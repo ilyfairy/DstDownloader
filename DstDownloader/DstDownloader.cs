@@ -174,7 +174,7 @@ namespace IlyfairyLib.Tools
         {
             var manifest = await Steam.GetDepotManifest(AppId, AppId, hcontent_file);
             if (manifest == null) return false;
-            bool s = await Steam.DownloadManifestFilesToDir(AppId, manifest, dir, 8, 8, 20);
+            bool s = await Steam.DownloadManifestFilesToDir(AppId, manifest, dir, 8, 8, 40);
             return s;
         }
         /// <summary>
@@ -183,24 +183,29 @@ namespace IlyfairyLib.Tools
         /// <param name="fileUrl">Mod文件链接</param>
         /// <param name="dir">目录</param>
         /// <returns></returns>
-        public async Task<bool> DownloadNonUGCModToDir(string fileUrl, string dir)
+        public async Task<bool> DownloadNonUGCModToDir(string fileUrl, string dir, int retry = 10)
         {
-            Stream stream;
-            try
+            Stream? stream = null;
+            retry++;
+            for (int i = 0; i < retry; i++)
             {
-                stream = await httpClient.GetStreamAsync(fileUrl);
+                try
+                {
+                    stream = await httpClient.GetStreamAsync(fileUrl);
+                }
+                catch (Exception)
+                {
+                }
+                if (stream != null) break;
             }
-            catch (Exception)
-            {
-                return false;
-            }
+            if (stream == null) return false;
+            
             ZipArchive zip = new(stream, ZipArchiveMode.Read);
             foreach (var item in zip.Entries)
             {
                 string path = Path.Combine(dir, item.FullName);
                 var c = Path.GetDirectoryName(path);
                 Directory.CreateDirectory(c);
-                var tmp = Path.GetFullPath(c);
                 FileStream fs;
                 if (File.Exists(path))
                 {
