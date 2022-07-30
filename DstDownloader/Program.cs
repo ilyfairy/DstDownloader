@@ -48,6 +48,7 @@ namespace IlyfairyLib.Tools
             }
             Console.WriteLine("登录成功");
             Console.WriteLine();
+            await dst.Steam.GetDefaultCDN();
 
             //获取版本
             if (dstAction.IsShowVersion)

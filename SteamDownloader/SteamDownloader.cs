@@ -80,9 +80,9 @@ namespace DepotDownloader
                     {
                         CDN[item.Host] = item;
                     }
+                    acquiredCDN.Add(Session?.steamClient?.CellID ?? 0);
                 }
             }
-            acquiredCDN.Add(Session?.steamClient?.CellID ?? 0);
 
             uint random = (uint)Random.Shared.Next(0, 5000);
             if (random <= 500 && !acquiredCDN.Contains(random))
