@@ -178,7 +178,7 @@ namespace IlyfairyLib.Tools
         {
             var manifest = await Steam.GetDepotManifest(await Steam.GetDefaultCDN(), AppId, AppId, hcontent_file);
             if (manifest == null) return false;
-            bool s = await Steam.DownloadManifestFilesToDir(AppId, manifest, dir);
+            bool s = await Steam.DownloadManifestFilesToDir(AppId, manifest, dir, 8, 8, 20);
             return s;
         }
         /// <summary>
@@ -204,6 +204,7 @@ namespace IlyfairyLib.Tools
                 string path = Path.Combine(dir, item.FullName);
                 var c = Path.GetDirectoryName(path);
                 Directory.CreateDirectory(c);
+                var tmp = Path.GetFullPath(c);
                 FileStream fs;
                 if (File.Exists(path))
                 {

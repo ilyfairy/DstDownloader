@@ -172,7 +172,7 @@ namespace DepotDownloader
                 return null;
             }
         }
-        public async Task<byte[]?> DownloadManifestBytesAsync(string cdnUrl, uint depotId, ulong manifestId, ulong? manifestRequestCode = null,int retry = 3)
+        public async Task<byte[]?> DownloadManifestBytesAsync(string cdnUrl, uint depotId, ulong manifestId, ulong? manifestRequestCode = null, int retry = 3)
         {
             retry++;
             if (manifestRequestCode == 0) manifestRequestCode = null;
@@ -202,7 +202,7 @@ namespace DepotDownloader
             }
             catch (Exception)
             {
-                if(cellId != 0) return await GetSteamCDNAsync(0);
+                if (cellId != 0) return await GetSteamCDNAsync(0);
                 return null;
             }
         }
@@ -211,7 +211,7 @@ namespace DepotDownloader
         {
             await Session.RequestAppInfo(appId);
             var values = GetSteam3AppSection(appId, EAppInfoSection.Depots);
-            if(values is null) return null;
+            if (values is null) return null;
             List<DepotInfo> list = new(8);
             foreach (var item in values.Children)
             {
@@ -223,7 +223,7 @@ namespace DepotDownloader
             return list.ToArray();
         }
 
-        public async Task<bool> DownloadManifestFilesToDir(uint depotId, DepotManifest manifest, string downloadDir = "DoNot Starve Together Dedicated Server", int fileMaxParallelism = 4, int chunkMaxParallelism = 4, int chunkRetry = 10, Action<FileData, bool>? fileDownloadedCallback = null)
+        public async Task<bool> DownloadManifestFilesToDir(uint depotId, DepotManifest manifest, string downloadDir, int fileMaxParallelism = 4, int chunkMaxParallelism = 4, int chunkRetry = 10, Action<FileData, bool>? fileDownloadedCallback = null)
         {
             CancellationTokenSource cts = new();
             ParallelOptions options = new();
@@ -233,7 +233,8 @@ namespace DepotDownloader
             bool down = true;
 
             //创建目录
-            foreach (var dirData in manifest.Files.Where(v => (v.Flags & EDepotFileFlag.Directory) == EDepotFileFlag.Directory).ToArray())
+            var dirs = manifest.Files.Where(v => (v.Flags & EDepotFileFlag.Directory) == EDepotFileFlag.Directory).ToArray();
+            foreach (var dirData in dirs)
             {
                 string path = Path.Combine(downloadDir, dirData.FileName);
                 Directory.CreateDirectory(path);
