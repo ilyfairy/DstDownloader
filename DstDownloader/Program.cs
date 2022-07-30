@@ -129,7 +129,7 @@ namespace IlyfairyLib.Tools
 
         static void PrintCopyright()
         {
-            Console.WriteLine("DstDownloader [Version 1.1.0]");
+            Console.WriteLine("DstDownloader [Version 1.1.1]");
             Console.WriteLine("Copyright (c) ilyfairy. All rights reserved.");
             Console.WriteLine();
         }
