@@ -12,10 +12,9 @@ namespace IlyfairyLib.Tools
         {
             ThreadPool.SetMinThreads(16, 16);
             ThreadPool.SetMaxThreads(32, 32);
-            //解析参数
 #if DEBUG
             //args = new string[] { "-version", "-server", "dst", "-mod", "123456123", "dst/mods/workshop-{id}", "-mod", "456789456", "dst/mods/workshop-{id}" };
-            //args = new string[] { "-NoLogo", "-modroot", "/mods/workshop-{id}", "-ugcmodroot", "ugc_mods/{id}", "-mod", "466732225", "-mod", "1049176456", "-mod", "791838548" };
+            args = new string[] { "-modroot", "/mods/workshop-{id}", "-ugcmodroot", "ugc_mods/{id}", "-mod", "466732225", "-mod", "1049176456", "-mod", "791838548" };
 #endif
             DstAction dstAction = new(args);
 
@@ -197,7 +196,7 @@ namespace IlyfairyLib.Tools
                     {
                         if (enumerator.MoveNext())
                         {
-                            ModRoot = (string)enumerator.Current;
+                            UgcModRoot = (string)enumerator.Current;
                         }
                     }
                 }
