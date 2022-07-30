@@ -13,7 +13,7 @@ namespace DepotDownloader
         public Steam3Session Session { get; }
         private readonly HttpClient _client;
         public uint? CellId => Session?.steamClient?.CellID;
-        public Dictionary<string,SteamCDN> CDN { get; } = new();
+        public Dictionary<string, SteamCDN> CDN { get; } = new();
         private HashSet<uint> acquiredCDN = new();
         public bool IsConnected
         {
@@ -71,7 +71,7 @@ namespace DepotDownloader
         }
         public async Task<SteamCDN> GetDefaultCDN()
         {
-            if(!acquiredCDN.Contains(Session?.steamClient?.CellID ?? 0))
+            if (!acquiredCDN.Contains(Session?.steamClient?.CellID ?? 0))
             {
                 var cellCDN = await GetSteamCDNAsync();
                 if (cellCDN != null)
@@ -84,8 +84,8 @@ namespace DepotDownloader
             }
             acquiredCDN.Add(Session?.steamClient?.CellID ?? 0);
 
-            uint random = (uint)Random.Shared.Next(0, 500);
-            if(random <= 200 && !acquiredCDN.Contains(random))
+            uint random = (uint)Random.Shared.Next(0, 5000);
+            if (random <= 500 && !acquiredCDN.Contains(random))
             {
                 var randomCDN = await GetSteamCDNAsync();
                 if (randomCDN != null)
@@ -97,7 +97,7 @@ namespace DepotDownloader
                 }
                 acquiredCDN.Add(random);
             }
-            
+
             return CDN.Values.ToList()[Random.Shared.Next(0, CDN.Count)];
         }
         public async Task<bool> AccountHasAccess(uint depotId)
@@ -160,31 +160,21 @@ namespace DepotDownloader
             return section_kv;
         }
 
-        public async Task<Stream?> DownloadManifestStreamAsync(string cdnUrl, uint depotId, ulong manifestId, ulong? manifestRequestCode = null)
+        public async Task<byte[]?> DownloadManifestBytesAsync(uint depotId, ulong manifestId, ulong? manifestRequestCode = null, int retry = 3)
         {
-            try
-            {
-                string url = $"http://{cdnUrl}/depot/{depotId}/manifest/{manifestId}/5/{manifestRequestCode}";
-                return await _client.GetStreamAsync(url);
-            }
-            catch (Exception)
-            {
-                return null;
-            }
-        }
-        public async Task<byte[]?> DownloadManifestBytesAsync(string cdnUrl, uint depotId, ulong manifestId, ulong? manifestRequestCode = null, int retry = 3)
-        {
+            var cdn = await GetDefaultCDN();
             retry++;
             if (manifestRequestCode == 0) manifestRequestCode = null;
-            string url = $"http://{cdnUrl}/depot/{depotId}/manifest/{manifestId}/5/{manifestRequestCode}";
             for (int i = 0; i < retry; i++)
             {
                 try
                 {
+                    string url = $"http://{cdn?.Host}/depot/{depotId}/manifest/{manifestId}/5/{manifestRequestCode}";
                     return await _client.GetByteArrayAsync(url);
                 }
                 catch (Exception)
                 {
+                    cdn = await GetDefaultCDN();
                 }
             }
             return null;
@@ -248,7 +238,7 @@ namespace DepotDownloader
                 {
                     if (!down) return;
                     string path = Path.Combine(downloadDir, file.FileName);
-                    bool downOne = await DownloadFileData(path, await GetDefaultCDN(), depotId, file, chunkMaxParallelism, chunkRetry);
+                    bool downOne = await DownloadFileData(path, depotId, file, chunkMaxParallelism, chunkRetry);
                     fileDownloadedCallback?.Invoke(file, downOne);
                     if (!downOne)
                     {
@@ -274,7 +264,7 @@ namespace DepotDownloader
         /// <param name="depotId"></param>
         /// <param name="fileData"></param>
         /// <returns></returns>
-        public async Task<bool> DownloadFileData(string path, SteamCDN cdn, uint depotId, FileData fileData, int chunkMaxParallelism = 4, int chunkRetry = 10)
+        public async Task<bool> DownloadFileData(string path, uint depotId, FileData fileData, int chunkMaxParallelism = 4, int chunkRetry = 10)
         {
             FileStream fs;
             //文件存在时 如果Hash一样则跳过
@@ -303,7 +293,7 @@ namespace DepotDownloader
             await Parallel.ForEachAsync(fileData.Chunks, options, async (chunk, v) =>
             {
                 if (!isSuccess) return;
-                DepotChunk? data = await DownloadChunk(cdn, depotId, chunk, chunkRetry);
+                DepotChunk? data = await DownloadChunk(depotId, chunk, chunkRetry);
                 if (data == null)
                 {
                     //如果下载失败
@@ -321,14 +311,15 @@ namespace DepotDownloader
 
             return isSuccess;
         }
-        public async Task<DepotChunk?> DownloadChunk(SteamCDN cdn, uint depotId, DepotManifest.ChunkData chunk, int retry = 3)
+        public async Task<DepotChunk?> DownloadChunk(uint depotId, DepotManifest.ChunkData chunk, int retry = 10)
         {
             retry++;
-            string url = $"http://{cdn.Host}/depot/{depotId}/chunk/{BitConverter.ToString(chunk.ChunkID).Replace("-", "")}";
+            var cdn = await GetDefaultCDN();
             for (int i = 0; i < retry; i++)
             {
                 try
                 {
+                    string url = $"http://{cdn?.Host}/depot/{depotId}/chunk/{BitConverter.ToString(chunk.ChunkID).Replace("-", "")}";
                     var data = await _client.GetByteArrayAsync(url);
                     DepotChunk? r = new(chunk, data);
                     r.Process(Session.DepotKeys[depotId]);
@@ -336,30 +327,30 @@ namespace DepotDownloader
                 }
                 catch (Exception e)
                 {
-
+                    cdn = await GetDefaultCDN();
                 }
             }
             return null;
         }
 
-        public async Task<DepotManifest?> GetDepotManifest(SteamCDN cdn, uint appId, DepotInfo depotInfo, string branch = "public")
+        public async Task<DepotManifest?> GetDepotManifest(uint appId, DepotInfo depotInfo, string branch = "public")
         {
             var code = await Session.GetDepotManifestRequestCodeAsync(depotInfo.DepotId, appId, depotInfo.Manifests[branch], branch);
             if (code == 0) return null;
-            byte[]? data = await DownloadManifestBytesAsync(cdn.Host, depotInfo.DepotId, depotInfo.Manifests[branch], code,5);
+            byte[]? data = await DownloadManifestBytesAsync(depotInfo.DepotId, depotInfo.Manifests[branch], code, 5);
             if (data == null) return null;
             data = ZipUtil.Decompress(data);
             var depotManifest = new DepotManifest(data);
-            var key = await Session.RequestDepotKey(depotInfo.DepotId,appId);
+            var key = await Session.RequestDepotKey(depotInfo.DepotId, appId);
             if (key == null) return null;
             depotManifest.DecryptFilenames(key);
             return depotManifest;
         }
-        public async Task<DepotManifest?> GetDepotManifest(SteamCDN cdn, uint appId, uint depotId, ulong manifestId, string branch = "public")
+        public async Task<DepotManifest?> GetDepotManifest(uint appId, uint depotId, ulong manifestId, string branch = "public")
         {
             var code = await Session.GetDepotManifestRequestCodeAsync(depotId, appId, manifestId, branch);
             if (code == 0) return null;
-            byte[]? data = await DownloadManifestBytesAsync(cdn.Host, depotId, manifestId, code, 5);
+            byte[]? data = await DownloadManifestBytesAsync(depotId, manifestId, code, 5);
             if (data == null) return null;
             data = ZipUtil.Decompress(data);
             var depotManifest = new DepotManifest(data);
@@ -390,7 +381,7 @@ namespace DepotDownloader
                         if (tmp.Login())
                         {
                             T? r = default;
-                            if(condition != null)
+                            if (condition != null)
                             {
                                 r = await condition(tmp);
                                 if (r == null) return;
@@ -433,8 +424,12 @@ namespace DepotDownloader
             {
                 tmp.Disconnect();
             }
-            return (dst,t);
+            return (dst, t);
+        }
 
+        public static async Task<SteamDownloader?> LoginByParallel(int count = 5, CancellationToken? cancellationToken = null)
+        {
+            return (await LoginByParallel<int>(count, cancellationToken, null)).steam;
         }
         #endregion
     }

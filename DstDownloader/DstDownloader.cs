@@ -51,16 +51,15 @@ namespace IlyfairyLib.Tools
         {
             try
             {
-                var cdn = (await Steam.GetSteamCDNAsync())?.FirstOrDefault();
                 DepotInfo[]? depots = await Steam.GetDepotsInfo(ServerId);
                 if (depots == null) return null;
                 var depot = depots.First(v => v.DepotId == ServerWindowsDepotId);
                 if (depot == null) return null;
-                var depotManifest = await Steam.GetDepotManifest(cdn, ServerId, depot, "public");
+                var depotManifest = await Steam.GetDepotManifest(ServerId, depot, "public");
                 if (depotManifest == null) return null;
                 var file = depotManifest.Files.FirstOrDefault(v => v.FileName == "version.txt");
                 if (file == null) return null;
-                var chunk = await Steam.DownloadChunk(cdn, depot.DepotId, file.Chunks.FirstOrDefault());
+                var chunk = await Steam.DownloadChunk(depot.DepotId, file.Chunks.FirstOrDefault());
                 if (chunk == null) return null;
                 string version = Encoding.UTF8.GetString(chunk.Data).TrimEnd();
                 return long.Parse(version);
@@ -103,13 +102,10 @@ namespace IlyfairyLib.Tools
                 depots.Add(item);
             }
 
-            var cdn = await Steam.GetDefaultCDN();
-            if (cdn == null) return null;
-
             List<(DepotInfo, DepotManifest)> infos = new();
             foreach (var depot in depots)
             {
-                var manifest = await Steam.GetDepotManifest(cdn, ServerId, depot);
+                var manifest = await Steam.GetDepotManifest(ServerId, depot);
                 if (manifest == null)
                 {
                     return null;
@@ -176,7 +172,7 @@ namespace IlyfairyLib.Tools
         /// <returns></returns>
         public async Task<bool> DownloadUGCModToDir(ulong hcontent_file, string dir)
         {
-            var manifest = await Steam.GetDepotManifest(await Steam.GetDefaultCDN(), AppId, AppId, hcontent_file);
+            var manifest = await Steam.GetDepotManifest(AppId, AppId, hcontent_file);
             if (manifest == null) return false;
             bool s = await Steam.DownloadManifestFilesToDir(AppId, manifest, dir, 8, 8, 20);
             return s;

@@ -71,13 +71,12 @@ namespace DepotDownloader
 
             //steam.Session.RequestAppInfo(322330);
 
-            var cdn = (await steam.GetSteamCDNAsync(0))?.FirstOrDefault();
             var depots = await steam.GetDepotsInfo(serId);
             var depot = depots.First(v => v.DepotId == 343051);
-            var depotManifest = await steam.GetDepotManifest(cdn, serId, depot, "public");
+            var depotManifest = await steam.GetDepotManifest(serId, depot, "public");
 
             var file = depotManifest.Files.FirstOrDefault(v => v.FileName == "version.txt");
-            var chunk = await steam.DownloadChunk(cdn, depot.DepotId, file.Chunks.FirstOrDefault());
+            var chunk = await steam.DownloadChunk(depot.DepotId, file.Chunks.FirstOrDefault());
             Console.WriteLine(Encoding.UTF8.GetString(chunk.Data));
 
 
