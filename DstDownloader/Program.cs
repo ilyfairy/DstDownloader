@@ -15,7 +15,7 @@ namespace IlyfairyLib.Tools
             //解析参数
 #if DEBUG
             //args = new string[] { "-version", "-server", "dst", "-mod", "123456123", "dst/mods/workshop-{id}", "-mod", "456789456", "dst/mods/workshop-{id}" };
-            args = new string[] { "-NoLogo", "-modroot", "/mods/workshop-{id}", "-ugcmodroot", "ugc_mods/{id}", "-mod", "466732225", "-mod", "1049176456", "-mod", "791838548" };
+            //args = new string[] { "-NoLogo", "-modroot", "/mods/workshop-{id}", "-ugcmodroot", "ugc_mods/{id}", "-mod", "466732225", "-mod", "1049176456", "-mod", "791838548" };
 #endif
             DstAction dstAction = new(args);
 
@@ -136,12 +136,12 @@ namespace IlyfairyLib.Tools
         }
         static void PrintUsage()
         {
-            Console.WriteLine("   --nogui, -n \t\t\t不显示帮助信息");
-            Console.WriteLine("   --version, -v \t\t获取饥荒版本");
-            Console.WriteLine("   --server, -s <dir>\t\t下载Server到指定目录");
-            Console.WriteLine("   --mod-root, -r <dir>\t\t指定Mod目录, 使用{id}代替ModID");
-            Console.WriteLine("   --ugc-mod-root, -R <dir>\t指定UgcMod目录, 使用{id}代替ModID");
-            Console.WriteLine("   --mod, -m <id>\t\t下载mod到指定目录, 可以指定多次");
+            Console.WriteLine("   --NoGui, -n \t\t\t不显示帮助信息");
+            Console.WriteLine("   --Version, -v \t\t获取饥荒版本");
+            Console.WriteLine("   --Server, -s <dir>\t\t下载Server到指定目录");
+            Console.WriteLine("   --ModRoot, -mr <dir>\t\t指定Mod目录, 使用{id}代替ModID");
+            Console.WriteLine("   --UgcModRoot, -umr <dir>\t指定UgcMod目录, 使用{id}代替ModID");
+            Console.WriteLine("   --Mod, -m <id>\t\t下载mod到指定目录, 可以指定多次");
 
         }
 
