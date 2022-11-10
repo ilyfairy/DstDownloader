@@ -14,20 +14,20 @@ using SteamKit2;
 namespace DepotDownloader
 {
 
-    class Program
+    internal class Program
     {
         static async Task Main(string[] args)
         {
             //args = new string[] { "-app", "322330", "-pubfile", "791838548" };
             //args = new string[] { "-app", "343050" };
 
-            //uint appId = 322330; //¼¢»ÄÓÎÏ·id
-            uint serId = 343050; //¼¢»Ä·şÎñÆ÷id
+            //uint appId = 322330; //é¥¥è’æ¸¸æˆid
+            uint serId = 343050; //é¥¥è’æœåŠ¡å™¨id
 
             SteamDownloader steam = new();
             if (!steam.Login())
             {
-                Console.WriteLine("µÇÂ¼Ê§°Ü");
+                Console.WriteLine("ç™»å½•å¤±è´¥");
                 return;
             }
 
