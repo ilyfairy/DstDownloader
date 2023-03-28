@@ -4,7 +4,7 @@ using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace IlyfairyLib.Tools
+namespace Ilyfairy.Tools
 {
     internal class Program
     {

@@ -15,7 +15,7 @@ using static SteamKit2.SteamUnifiedMessages;
 
 namespace DepotDownloader
 {
-    public class Steam3Session
+    public class Steam3Session : IDisposable
     {
         public static bool IsDebug { get; set; } = false;
         public class Credentials
@@ -157,7 +157,7 @@ namespace DepotDownloader
 
         public delegate bool WaitCondition();
 
-        private readonly object steamLock = new object();
+        private readonly object steamLock = new();
 
         public bool WaitUntilCallback(Action submitter, WaitCondition waiter)
         {
@@ -199,7 +199,7 @@ namespace DepotDownloader
                 return AppInfo[appId];
             }
 
-            //获取Token
+            //鑾峰彇Token
             PICSTokensCallback appTokens = null;
             try
             {
@@ -221,7 +221,7 @@ namespace DepotDownloader
                 this.AppTokens[token_dict.Key] = token_dict.Value;
             }
 
-            //获取AppInfo
+            //鑾峰彇AppInfo
             var request = new SteamApps.PICSRequest(appId);
             if (AppTokens.ContainsKey(appId))
             {
@@ -251,7 +251,7 @@ namespace DepotDownloader
                 AppInfo[app] = null;
             }
 
-            // 返回
+            // 杩斿洖
             if (AppInfo.TryGetValue(appId, out var val))
             {
                 return val;
@@ -780,6 +780,18 @@ namespace DepotDownloader
             steamUser.AcceptNewLoginKey(loginKey);
 
             bDidReceiveLoginKey = true;
+        }
+
+        public void Dispose()
+        {
+            Disconnect();
+            steamClient.Disconnect();
+            _httpclient.Dispose();
+            //steamUser;
+            //steamApps;
+            //steamCloud;
+            //steamPublishedFile;
+            //callbacks;
         }
     }
 }

@@ -11,7 +11,7 @@ namespace DepotDownloader
     {
         #region 属性字段
         public Steam3Session Session { get; }
-        private readonly HttpClient _client;
+        private static readonly HttpClient _client = new();
         public uint? CellId => Session?.steamClient?.CellID;
         public Dictionary<string, SteamCDN> CDN { get; } = new();
         private HashSet<uint> acquiredCDN = new();
@@ -26,7 +26,6 @@ namespace DepotDownloader
 
         public SteamDownloader()
         {
-            _client = new();
             Session = new(new SteamUser.LogOnDetails
             {
                 Username = null,
@@ -68,6 +67,7 @@ namespace DepotDownloader
         public void Dispose()
         {
             Session.Disconnect();
+            Session.Dispose();
         }
         public async Task<SteamCDN> GetDefaultCDN()
         {

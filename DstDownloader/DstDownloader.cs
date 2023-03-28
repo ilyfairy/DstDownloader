@@ -11,7 +11,7 @@ using System.Text;
 using static SteamKit2.DepotManifest;
 using static SteamKit2.SteamApps.PICSProductInfoCallback;
 
-namespace IlyfairyLib.Tools
+namespace Ilyfairy.Tools
 {
     public class DstDownloader : IDisposable
     {
@@ -21,7 +21,7 @@ namespace IlyfairyLib.Tools
         public const uint AppId = 322330; //饥荒客户端id
         public SteamDownloader Steam { get; } = new();
         public bool IsConnected => Steam.IsConnected;
-        private readonly HttpClient httpClient = new();
+        private static readonly HttpClient httpClient = new();
         #endregion
 
 
@@ -46,6 +46,7 @@ namespace IlyfairyLib.Tools
         public void Dispose()
         {
             Disconnect();
+            Steam.Dispose();
         }
         public async Task<long?> GetServerVersion()
         {
@@ -265,7 +266,7 @@ namespace IlyfairyLib.Tools
             {
                 _ = Task.Run((async () =>
                 {
-                    DstDownloader dst = new();
+                    using DstDownloader dst = new();
                     dsts.Add(dst);
                     try
                     {

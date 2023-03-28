@@ -1,6 +1,6 @@
 ﻿using SteamKit2.Internal;
 
-namespace IlyfairyLib.Tools
+namespace Ilyfairy.Tools
 {
     public class ModInfo
     {
