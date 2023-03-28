@@ -10,12 +10,6 @@ namespace Ilyfairy.Tools
     {
         static async Task<int> Main(string[] args)
         {
-            ThreadPool.SetMinThreads(16, 16);
-            ThreadPool.SetMaxThreads(32, 32);
-#if DEBUG
-            //args = new string[] { "-version", "-server", "dst", "-mod", "123456123", "dst/mods/workshop-{id}", "-mod", "456789456", "dst/mods/workshop-{id}" };
-            args = new string[] { "-modroot", "mods/workshop-{id}", "-ugcmodroot", "ugc_mods/{id}", "-mod", "912647660", "-mod", "791838548", "-mod", "2189004162","-m" , "2528541304" };
-#endif
             DstAction dstAction = new(args);
 
             if (!dstAction.NoGUI)

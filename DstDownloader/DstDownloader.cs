@@ -1,11 +1,7 @@
 ﻿using DepotDownloader;
 using SteamKit2;
-using SteamKit2.CDN;
 using SteamKit2.Internal;
-using System.Diagnostics;
-using System.IO;
 using System.IO.Compression;
-using System.Runtime.ConstrainedExecution;
 using System.Security.Cryptography;
 using System.Text;
 using static SteamKit2.DepotManifest;

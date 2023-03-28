@@ -18,9 +18,6 @@ namespace DepotDownloader
     {
         static async Task Main(string[] args)
         {
-            //args = new string[] { "-app", "322330", "-pubfile", "791838548" };
-            //args = new string[] { "-app", "343050" };
-
             //uint appId = 322330; //饥荒游戏id
             uint serId = 343050; //饥荒服务器id
 
@@ -40,21 +37,6 @@ namespace DepotDownloader
             var file = depotManifest.Files.FirstOrDefault(v => v.FileName == "version.txt");
             var chunk = await steam.DownloadChunk(depot.DepotId, file.Chunks.FirstOrDefault());
             Console.WriteLine(Encoding.UTF8.GetString(chunk.Data));
-
-
-            //var details = steam.Session.GetPublishedFileDetails(appId, 791838548);
-            //if (details.hcontent_file > 0) // is ugc
-            //{
-
-            //}
-            //else
-            //{
-            //    //18446744073709551615
-            //    //7809214632547068155
-            //}
-
-
-
         }
 
      
