@@ -32,13 +32,6 @@
   <ItemGroup>
     <None Remove="3rd party.txt" />
     <None Remove="changes.txt" />
-    <None Remove="license.txt" />
-  </ItemGroup>
-  <ItemGroup>
-    <Content Include="license.txt">
-        <Pack>true</Pack>
-        <PackagePath />
-    </Content>
   </ItemGroup>
 
   <ItemGroup>

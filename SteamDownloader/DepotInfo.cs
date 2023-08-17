@@ -60,6 +60,22 @@ namespace DepotDownloader
                     {
                         Manifests.Add(item.Key, manifestsId);
                     }
+
+                    foreach (var v in item.Value.Children)
+                    {
+                        if (v.Name == "gid" && ulong.TryParse(v.Value, out manifestsId))
+                        {
+                            Manifests.Add(item.Key, manifestsId);
+                        }
+                        else if (v.Name == "size")
+                        {
+                            MaxSize = long.Parse(v.Value);
+                        }
+                        else if (v.Name == "download")
+                        {
+
+                        }
+                    }
                 }
             }
 

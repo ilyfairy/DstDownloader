@@ -124,12 +124,13 @@ namespace DepotDownloader
         }
         public static bool BytesCompare(byte[] v1, byte[] v2)
         {
-            if (v1.Length != v2.Length) return false;
-            for (int i = 0; i < v1.Length; i++)
-            {
-                if (v1[i] != v2[i]) return false;
-            }
-            return true;
+            return v1.AsSpan().SequenceEqual(v2);
+            //if (v1.Length != v2.Length) return false;
+            //for (int i = 0; i < v1.Length; i++)
+            //{
+            //    if (v1[i] != v2[i]) return false;
+            //}
+            //return true;
         }
 
         public static byte[] DecodeHexString(string hex)

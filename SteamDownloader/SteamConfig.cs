@@ -11,7 +11,8 @@ namespace DepotDownloader
     {
         public static void SetApiUrl(string url = "https://api.steampowered.com/")
         {
-            WebAPI.DefaultBaseAddress = new(url, UriKind.Absolute);
+            //WebAPI.DefaultBaseAddress = new(url, UriKind.Absolute);
+            typeof(WebAPI).GetProperty("DefaultBaseAddress", (System.Reflection.BindingFlags)(-1)).SetValue(null, new Uri(url));
         }
     }
 }

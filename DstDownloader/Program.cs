@@ -10,6 +10,7 @@ namespace Ilyfairy.Tools
     {
         static async Task<int> Main(string[] args)
         {
+            SteamConfig.SetApiUrl();
             DstAction dstAction = new(args);
 
             if (!dstAction.NoGUI)

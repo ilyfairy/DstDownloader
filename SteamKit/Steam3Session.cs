@@ -73,9 +73,7 @@ namespace DepotDownloader
 
         static readonly TimeSpan STEAM3_TIMEOUT = TimeSpan.FromSeconds(30);
 
-        private HttpClient _httpclient = new()
-        {
-        };
+        private readonly HttpClient _httpclient = new();
 
         public Steam3Session(SteamUser.LogOnDetails details)
         {
@@ -793,6 +791,9 @@ namespace DepotDownloader
             //steamCloud;
             //steamPublishedFile;
             //callbacks;
+
+
+            
         }
     }
 }
