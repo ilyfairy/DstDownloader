@@ -179,7 +179,7 @@ namespace SteamKit2
         public static void Assert( [DoesNotReturnIf(false)] bool condition, string category, string message )
         {
             // make use of .NET's assert facility first
-            Debug.Assert( condition, string.Format( "{0}: {1}", category, message ) );
+            //Debug.Assert( condition, string.Format( "{0}: {1}", category, message ) );
 
             // then spew to our debuglog, so we can get info in release builds
             if ( !condition )
