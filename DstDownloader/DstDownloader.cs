@@ -15,7 +15,7 @@ namespace Ilyfairy.Tools
         public const uint ServerId = 343050; //饥荒服务器id
         public const uint ServerWindowsDepotId = 343051; //饥荒服务器id for Windows
         public const uint AppId = 322330; //饥荒客户端id
-        public SteamDownloader Steam { get; } = new();
+        public SteamDownloader Steam { get; }
         public bool IsConnected => Steam.IsConnected;
         private static readonly HttpClient httpClient = new();
         #endregion
