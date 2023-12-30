@@ -1,0 +1,3 @@
+[submodule "SteamDownloader"]
+	path = SteamDownloader
+	url = https://github.com/ilyfairy/SteamDownloader
