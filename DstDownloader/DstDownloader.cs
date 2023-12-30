@@ -4,8 +4,6 @@ using SteamKit2.Internal;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
-using static SteamKit2.DepotManifest;
-using static SteamKit2.SteamApps.PICSProductInfoCallback;
 
 namespace Ilyfairy.Tools;
 
@@ -16,7 +14,6 @@ public class DstDownloader : IDisposable
     public const uint AppId = 322330; //饥荒客户端AppId
     public SteamSession Steam { get; }
     private static readonly HttpClient httpClient = new();
-
 
     public DstDownloader()
     {
@@ -51,7 +48,7 @@ public class DstDownloader : IDisposable
     /// <param name="platform">平台</param>
     /// <param name="downloadDir">要下载的目录</param>
     /// <returns></returns>
-    public async Task DownloadServerToDir(DepotsContent.OS platform, string downloadDir = "DoNot Starve Together Dedicated Server", int fileMaxParallelism = 4, int chunkMaxParallelism = 4, int chunkRetry = 10, Action<FileData, bool>? fileDownloadedCallback = null)
+    public async Task DownloadServerToDir(DepotsContent.OS platform, string downloadDir = "DoNot Starve Together Dedicated Server", int fileMaxParallelism = 4, int chunkMaxParallelism = 4, int chunkRetry = 10, Action<SteamKit2.DepotManifest.FileData, bool>? fileDownloadedCallback = null)
     {
         Directory.CreateDirectory(downloadDir);
 
