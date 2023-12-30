@@ -1,4 +1,5 @@
-﻿using SteamKit2;
+﻿using SteamDownloader;
+using SteamKit2;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -9,14 +10,14 @@ internal class Program
 {
     static async Task<int> Main(string[] args)
     {
-        SteamConfig.SetApiUrl();
+        args = ["-v"];
         DstAction dstAction = new(args);
 
         if (!dstAction.NoGUI)
         {
             PrintCopyright();
         }
-
+        
         //显示帮助
         if (args.Length == 0)
         {
@@ -33,24 +34,49 @@ internal class Program
 
         //登录
         Console.WriteLine("正在登录...");
-        using DstDownloader? dst = await DstDownloader.LoginByParallel(8);
-        if (dst == null)
+        using DstDownloader? dst = new DstDownloader();
+        try
         {
-            Console.WriteLine("登录失败");
-            Environment.Exit(-1);
-            return -1;
+            await dst.Steam.Authentication.LoginAnonymousAsync();
+        }
+        catch (Exception)
+        {
+            Console.WriteLine("登录失败, 正在重新连接...");
+            try
+            {
+                await dst.Steam.Authentication.LoginAnonymousAsync();
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("登录失败");
+                return -1;
+            }
         }
         Console.WriteLine("登录成功");
         Console.WriteLine();
-        await dst.Steam.GetDefaultCDN();
+
+        //获取cdn下载服务器
+        var cdn = await dst.Steam.GetCdnServersAsync();
+        IReadOnlyCollection<SteamContentServer> newCdn = await SteamHelper.TestContentServerConnectionAsync(dst.Steam.HttpClient, cdn,TimeSpan.FromSeconds(3));
+        if (newCdn.Count == 0)
+            newCdn = cdn;
+        dst.Steam.ContentServers.AddRange(newCdn);
 
         //获取版本
         if (dstAction.IsShowVersion)
         {
             Console.WriteLine("正在获取饥荒版本...");
-            long? version = await dst.GetServerVersion();
-            Console.WriteLine($"饥荒最新版本: {(version is null ? "获取失败" : version)}");
-            Console.WriteLine();
+            try
+            {
+                long version = await dst.GetServerVersion();
+                Console.WriteLine($"饥荒最新版本: {version}");
+                File.WriteAllText("version.txt", version.ToString());
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("获取失败");
+                return -1;
+            }
         }
 
         //下载Server
@@ -58,23 +84,24 @@ internal class Program
         {
             Console.WriteLine("开始下载饥荒服务器...");
             string dir = dstAction.ServerDir!;
-            Platform platform = Platform.Windows;
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) platform = Platform.Windows;
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) platform = Platform.Linux;
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) platform = Platform.MacOS;
+            DepotsContent.OS platform = DepotsContent.OS.Windows;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) platform = DepotsContent.OS.Windows;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) platform = DepotsContent.OS.Linux;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) platform = DepotsContent.OS.MacOS;
 
-            bool s = await dst.DownloadServerToDir(platform, dir, 8, 8, 50, (file, isDown) =>
+            try
             {
-                Console.WriteLine($"下载 {isDown} {Path.Combine(dir, file.FileName)}");
-            });
-            Console.WriteLine($"饥荒Server-{platform}下载{(s ? "成功" : "失败")}");
-
-            if (!s)
+                await dst.DownloadServerToDir(platform, dir, 8, 8, 50, (file, isDown) =>
+                {
+                    Console.WriteLine($"下载 {isDown} {Path.Combine(dir, file.FileName)}");
+                });
+            }
+            catch (Exception e)
             {
-                dst.Disconnect();
-                Environment.Exit(-1);
+                Console.WriteLine($"饥荒Server-{platform}下载失败\n{e}");
                 return -1;
             }
+
             Console.WriteLine();
         }
 
@@ -101,25 +128,29 @@ internal class Program
                     return;
                 }
                 string dir;
-                bool isSuccess;
-                if (info.IsUgc)
+                try
                 {
-                    dir = dstAction.UgcModRoot.Replace("{id}", id.ToString(), StringComparison.InvariantCultureIgnoreCase);
-                    isSuccess = await dst.DownloadUGCModToDir(info.details.hcontent_file, dir);
+                    if (info.IsUGC)
+                    {
+                        dir = dstAction.UgcModRoot.Replace("{id}", id.ToString(), StringComparison.InvariantCultureIgnoreCase);
+                        await dst.DownloadUGCModToDirectory(info.details.hcontent_file, dir);
+                    }
+                    else
+                    {
+                        dir = dstAction.ModRoot.Replace("{id}", id.ToString(), StringComparison.InvariantCultureIgnoreCase);
+                        await dst.DownloadNonUGCModToDirectoryAsync(info.FileUrl, dir);
+                    }
                 }
-                else
+                catch (Exception)
                 {
-                    dir = dstAction.ModRoot.Replace("{id}", id.ToString(), StringComparison.InvariantCultureIgnoreCase);
-                    isSuccess = await dst.DownloadNonUGCModToDir(info.FileUrl, dir);
+                    Console.WriteLine($"Mod {id}下载失败");
+                    throw;
                 }
-                Console.WriteLine($"下载 Mod{(info.IsUgc?"-UGC":"")}\t{id} " + (isSuccess ? "成功" : "失败"));
+                Console.WriteLine($"下载 Mod {id} 成功");
             });
         }
 
-        dst.Disconnect();
-        Environment.Exit(0);
         return 0;
-
     }
 
     static void PrintCopyright()
