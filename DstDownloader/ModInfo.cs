@@ -11,6 +11,19 @@ public class ModInfo
         Tags = details.tags.Select(v => v.display_name).ToArray();
     }
 
+    public bool IsValid
+    {
+        get
+        {
+            if (details.result == 1)
+                return true;
+            if (details.result == 8)
+                return false;
+
+            return true;
+        }
+    }
+
     /// <summary>
     /// Mod名称
     /// </summary>
@@ -24,7 +37,7 @@ public class ModInfo
     /// <summary>
     /// 是否是UGC的Mod
     /// </summary>
-    public bool IsUGC => string.IsNullOrEmpty(details.file_url);
+    public bool IsUGC => string.IsNullOrEmpty(details.file_url) && IsValid;
 
     /// <summary>
     /// Mod描述
