@@ -1,4 +1,5 @@
 ﻿using SteamDownloader;
+using SteamDownloader.Helpers;
 using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
@@ -292,7 +293,7 @@ public class ApplicationCommand : RootCommand
             {
                 if (info.IsUGC)
                 {
-                    await dst.DownloadUGCModToDirectoryAsync(info.details.hcontent_file, GetModDir());
+                    await dst.DownloadUGCModToDirectoryAsync(info.details.HContentFile, GetModDir());
                 }
                 else
                 {

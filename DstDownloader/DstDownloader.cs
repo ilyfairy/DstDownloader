@@ -1,6 +1,6 @@
 ﻿using SteamDownloader;
+using SteamDownloader.WebApi;
 using SteamKit2;
-using SteamKit2.Internal;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -9,9 +9,9 @@ namespace Ilyfairy.Tools;
 
 public class DstDownloader : IDisposable
 {
-    public const uint ServerAppId = 343050; //饥荒服务器AppId
-    public const uint ServerWindowsDepotId = 343051; //饥荒服务器AppId for Windows
-    public const uint AppId = 322330; //饥荒客户端AppId
+    public readonly uint ServerAppId = 343050; //饥荒服务器AppId
+    public readonly uint ServerWindowsDepotId = 343051; //饥荒服务器AppId for Windows
+    public readonly uint AppId = 322330; //饥荒客户端AppId
     public SteamSession Steam { get; }
 
     public string? AccessToken => Steam.Authentication.AccessToken;
@@ -190,7 +190,7 @@ public class DstDownloader : IDisposable
     /// <returns></returns>
     public async Task<ModInfo> GetModInfoAsync(ulong modId)
     {
-        PublishedFileDetails details = await Steam.GetPublishedFileAsync(AppId, modId);
+        WorkshopFileDetails details = await Steam.GetPublishedFileAsync(AppId, modId);
         ModInfo mod = new(details);
         return mod;
     }
@@ -202,7 +202,7 @@ public class DstDownloader : IDisposable
     /// <returns></returns>
     public async Task<ModInfo[]?> GetModInfoAsync(params ulong[] modIds)
     {
-        ICollection<PublishedFileDetails>? details = await Steam.GetPublishedFileAsync(AppId, modIds);
+        ICollection<WorkshopFileDetails>? details = await Steam.GetPublishedFileAsync(AppId, modIds);
         if (details == null) return null;
 
         return details.Select(v => new ModInfo(v)).ToArray();
@@ -273,7 +273,7 @@ public class DstDownloader : IDisposable
 
         if (info.IsUGC)
         {
-            await DownloadUGCModToDirectoryAsync(info.details.hcontent_file, dir);
+            await DownloadUGCModToDirectoryAsync(info.details.HContentFile, dir);
         }
         else
         {
