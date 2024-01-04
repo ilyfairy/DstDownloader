@@ -15,6 +15,7 @@ public class DstDownloader : IDisposable
     public SteamSession Steam { get; }
 
     public string? AccessToken => Steam.Authentication.AccessToken;
+    public bool IsCache { get => Steam.IsCache; set => Steam.IsCache = value; }
 
     public DstDownloader()
     {
@@ -65,13 +66,13 @@ public class DstDownloader : IDisposable
 
     public async Task<long> GetServerVersionAsync(CancellationToken cancellationToken = default)
     {
-        var appInfo = await Steam.GetAppInfoAsync(ServerAppId);
+        var appInfo = await Steam.GetAppInfoAsync(ServerAppId, cancellationToken);
         var depotsContent = Steam.GetAppInfoDepotsSection(appInfo);
         var windst = depotsContent.DepotsInfo[ServerWindowsDepotId];
-        var manifest = await Steam.GetDepotManifestAsync(ServerAppId, windst.DepotId, windst.Manifests["public"].ManifestId, "public", cancellationToken);
+        var key = await Steam.GetDepotKeyAsync(windst.DepotId, appInfo.ID);
+        var manifest = await Steam.GetDepotManifestAsync(ServerAppId, windst.DepotId, windst.Manifests["public"].ManifestId, key, "public", cancellationToken);
         var file = manifest.Files!.First(v => v.FileName is "version.txt");
 
-        var key = await Steam.GetDepotKeyAsync(windst.DepotId);
         var bytes = await Steam.DownloadChunkDataAsync(windst.DepotId, file.Chunks.First(), key, cancellationToken);
         var str = Encoding.UTF8.GetString(bytes);
         return long.Parse(str);
