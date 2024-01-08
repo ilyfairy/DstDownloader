@@ -1,4 +1,5 @@
 ﻿using SteamDownloader;
+using SteamDownloader.Helpers;
 using SteamDownloader.WebApi;
 using SteamKit2;
 using System.IO.Compression;
@@ -30,9 +31,9 @@ public class DstDownloader : IDisposable
     /// 匿名登录
     /// </summary>
     /// <returns></returns>
-    public async Task LoginAsync(CancellationToken cancellationToken = default)
+    public Task LoginAsync(CancellationToken cancellationToken = default)
     {
-        await Steam.Authentication.LoginAnonymousAsync(cancellationToken);
+        return Steam.Authentication.LoginAnonymousAsync(cancellationToken);
     }
 
     /// <summary>
@@ -42,9 +43,9 @@ public class DstDownloader : IDisposable
     /// <param name="password">密码</param>
     /// <param name="shouldRememberPassword">是否记住密码, 之后可以用AccessToken登录</param>
     /// <returns></returns>
-    public async Task LoginAsync(string username, string password, bool shouldRememberPassword, CancellationToken cancellationToken = default)
+    public Task LoginAsync(string username, string password, bool shouldRememberPassword, CancellationToken cancellationToken = default)
     {
-        await Steam.Authentication.LoginAsync(username, password, shouldRememberPassword, cancellationToken);
+        return Steam.Authentication.LoginAsync(username, password, shouldRememberPassword, cancellationToken);
     }
 
     /// <summary>
@@ -53,9 +54,9 @@ public class DstDownloader : IDisposable
     /// <param name="username">用户名</param>
     /// <param name="accessToken">AccessToken</param>
     /// <returns></returns>
-    public async Task LoginAsync(string username, string accessToken, CancellationToken cancellationToken = default)
+    public Task LoginAsync(string username, string accessToken, CancellationToken cancellationToken = default)
     {
-        await Steam.Authentication.LoginFromAccessTokenAsync(username, accessToken, cancellationToken);
+        return Steam.Authentication.LoginFromAccessTokenAsync(username, accessToken, cancellationToken);
     }
 
 
@@ -66,14 +67,14 @@ public class DstDownloader : IDisposable
 
     public async Task<long> GetServerVersionAsync(CancellationToken cancellationToken = default)
     {
-        var appInfo = await Steam.GetAppInfoAsync(ServerAppId, cancellationToken);
-        var depotsContent = Steam.GetAppInfoDepotsSection(appInfo);
+        var appInfo = await Steam.GetProductInfoAsync(ServerAppId, cancellationToken).ConfigureAwait(false);
+        var depotsContent = appInfo.GetProductInfoDepotsSection();
         var windst = depotsContent.DepotsInfo[ServerWindowsDepotId];
-        var key = await Steam.GetDepotKeyAsync(windst.DepotId, appInfo.ID);
-        var manifest = await Steam.GetDepotManifestAsync(ServerAppId, windst.DepotId, windst.Manifests["public"].ManifestId, key, "public", cancellationToken);
+        var key = await Steam.GetDepotKeyAsync(appInfo.ID, windst.DepotId).ConfigureAwait(false);
+        var manifest = await Steam.GetDepotManifestAsync(ServerAppId, windst.DepotId, windst.Manifests["public"].ManifestId, key, "public", cancellationToken).ConfigureAwait(false);
         var file = manifest.Files!.First(v => v.FileName is "version.txt");
 
-        var bytes = await Steam.DownloadChunkDataAsync(windst.DepotId, file.Chunks.First(), key, cancellationToken);
+        var bytes = await Steam.DownloadChunkDataAsync(windst.DepotId, file.Chunks.First(), key, cancellationToken).ConfigureAwait(false);
         var str = Encoding.UTF8.GetString(bytes);
         return long.Parse(str);
     }
@@ -84,14 +85,14 @@ public class DstDownloader : IDisposable
     /// <param name="platform">平台</param>
     /// <param name="dir">要下载的目录</param>
     /// <returns></returns>
-    public async Task DownloadServerToDirectoryAsync(DepotsContent.OS platform, string dir, Action<FileProgress>? downloadCallback = null, CancellationToken cancellationToken = default)
+    public async Task DownloadServerToDirectoryAsync(DepotsSection.OS platform, string dir, Action<FileProgress>? downloadCallback = null, CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(dir);
 
-        var appInfo = await Steam.GetAppInfoAsync(ServerAppId);
-        var depotsContent = Steam.GetAppInfoDepotsSection(appInfo);
+        var appInfo = await Steam.GetProductInfoAsync(ServerAppId, cancellationToken).ConfigureAwait(false);
+        var depotsContent = appInfo.GetProductInfoDepotsSection();
 
-        var depots = depotsContent.Where(v => v.Config?.Oslist is null or DepotsContent.OS.Unknow || v.Config.Oslist == platform);
+        var depots = depotsContent.Where(v => v.Config?.Oslist is null or DepotsSection.OS.Unknow || v.Config.Oslist == platform);
 
         List<DepotManifest> manifests = new();
         foreach (var depot in depots)
@@ -99,7 +100,7 @@ public class DstDownloader : IDisposable
             if (depot.Manifests.Count == 0)
                 continue;
 
-            var manifest = await Steam.GetDepotManifestAsync(ServerAppId, depot.DepotId, depot.Manifests["public"].ManifestId, "public", cancellationToken);
+            var manifest = await Steam.GetDepotManifestAsync(ServerAppId, depot.DepotId, depot.Manifests["public"].ManifestId, "public", cancellationToken).ConfigureAwait(false);
             manifests.Add(manifest);
         }
 
@@ -113,6 +114,8 @@ public class DstDownloader : IDisposable
 
         foreach (var manifest in manifests)
         {
+            var depotKey = await Steam.GetDepotKeyAsync(ServerAppId, manifest.DepotID).ConfigureAwait(false);
+
             var flagsGroup = manifest.Files!.GroupBy(v => v.Flags.HasFlag(EDepotFileFlag.Directory));
             var dirs = flagsGroup.FirstOrDefault(v => v.Key is true);
             var files = flagsGroup.FirstOrDefault(v => v.Key is false);
@@ -141,22 +144,22 @@ public class DstDownloader : IDisposable
             var filesMax = sizeGroup.FirstOrDefault(v => v.Key is "max");
 
             if (filesMax is { })
-                await ParallelForEachAsync(filesMax, 1);
+                await ParallelForEachAsync(filesMax, 1).ConfigureAwait(false);
             if (files10mb is { })
-                await ParallelForEachAsync(files10mb, 3);
+                await ParallelForEachAsync(files10mb, 3).ConfigureAwait(false);
             if (files1mb is { })
-                await ParallelForEachAsync(files1mb, 10);
+                await ParallelForEachAsync(files1mb, 10).ConfigureAwait(false);
             if (files100kb is { })
-                await ParallelForEachAsync(files100kb, 30);
+                await ParallelForEachAsync(files100kb, 30).ConfigureAwait(false);
 
-            async ValueTask ParallelForEachAsync(IEnumerable<DepotManifest.FileData> fileDatas, int maxDegreeOfParallelism)
+            Task ParallelForEachAsync(IEnumerable<DepotManifest.FileData> fileDatas, int maxDegreeOfParallelism)
             {
                 var opt = new ParallelOptions()
                 {
                     CancellationToken = cancellationToken,
                     MaxDegreeOfParallelism = maxDegreeOfParallelism,
                 };
-                await Parallel.ForEachAsync(fileDatas, opt, async (fileData, cancellationToken) =>
+                return Parallel.ForEachAsync(fileDatas, opt, async (fileData, cancellationToken) =>
                 {
                     var fullPath = Path.Combine(dir, fileData.FileName);
                     var d = Path.GetDirectoryName(fullPath)!;
@@ -176,7 +179,7 @@ public class DstDownloader : IDisposable
                         fs.Seek(0, SeekOrigin.Begin);
                     }
 
-                    await Steam.DownloadFileDataToStreamAsync(fs, manifest.DepotID, fileData, cancellationToken);
+                    await Steam.DownloadFileDataToStreamAsync(fs, manifest.DepotID, depotKey, fileData, cancellationToken).ConfigureAwait(false);
                     downloadCallback?.Invoke(new FileProgress(fileData, false, Interlocked.Add(ref completedFileSize, (long)fileData.TotalSize), Interlocked.Increment(ref completedFileCount), totalFileSize, totalFileCount));
                 });
             }
@@ -191,7 +194,7 @@ public class DstDownloader : IDisposable
     /// <returns></returns>
     public async Task<ModInfo> GetModInfoAsync(ulong modId)
     {
-        WorkshopFileDetails details = await Steam.GetPublishedFileAsync(AppId, modId);
+        WorkshopFileDetails details = await Steam.GetPublishedFileAsync(AppId, modId).ConfigureAwait(false);
         ModInfo mod = new(details);
         return mod;
     }
@@ -203,7 +206,7 @@ public class DstDownloader : IDisposable
     /// <returns></returns>
     public async Task<ModInfo[]?> GetModInfoAsync(params ulong[] modIds)
     {
-        ICollection<WorkshopFileDetails>? details = await Steam.GetPublishedFileAsync(AppId, modIds);
+        ICollection<WorkshopFileDetails>? details = await Steam.GetPublishedFileAsync(AppId, modIds).ConfigureAwait(false);
         if (details == null) return null;
 
         return details.Select(v => new ModInfo(v)).ToArray();
@@ -212,13 +215,13 @@ public class DstDownloader : IDisposable
     /// <summary>
     /// 下载UGC Mod到指定目录
     /// </summary>
-    /// <param name="hcontent_file">ModInfo.details.hcontent_file</param>
+    /// <param name="hcontent_file"><see cref="WorkshopFileDetails.HContentFile"/> or <see cref="SteamKit2.Internal.PublishedFileDetails.hcontent_file"/></param>
     /// <param name="dir">目录</param>
     /// <returns></returns>
     public async Task DownloadUGCModToDirectoryAsync(ulong hcontent_file, string dir)
     {
         var manifest = await Steam.GetWorkshopManifestAsync(AppId, hcontent_file);
-        await Steam.DownloadDepotManifestToDirectoryAsync(dir, AppId, manifest);
+        await Steam.DownloadDepotManifestToDirectoryAsync(dir, AppId, AppId, manifest).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -257,7 +260,7 @@ public class DstDownloader : IDisposable
             }
 
             using var zipFileStream = item.Open();
-            await zipFileStream.CopyToAsync(fs, cancellationToken);
+            await zipFileStream.CopyToAsync(fs, cancellationToken).ConfigureAwait(false);
         }
         return true;
     }
@@ -270,15 +273,15 @@ public class DstDownloader : IDisposable
     /// <returns></returns>
     public async Task DownloadModToDirectoryAsync(ulong modId, string dir)
     {
-        var info = await GetModInfoAsync(modId);
+        var info = await GetModInfoAsync(modId).ConfigureAwait(false);
 
         if (info.IsUGC)
         {
-            await DownloadUGCModToDirectoryAsync(info.details.HContentFile, dir);
+            await DownloadUGCModToDirectoryAsync(info.details.HContentFile, dir).ConfigureAwait(false);
         }
         else
         {
-            await DownloadNonUGCModToDirectoryAsync(info.FileUrl, dir);
+            await DownloadNonUGCModToDirectoryAsync(info.FileUrl, dir).ConfigureAwait(false);
         }
     }
 

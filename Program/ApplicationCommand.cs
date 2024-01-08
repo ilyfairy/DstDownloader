@@ -137,10 +137,10 @@ public class ApplicationCommand : RootCommand
         {
             Console.WriteLine("开始下载饥荒服务器...");
             string dir = args.ServerDir!;
-            DepotsContent.OS platform = DepotsContent.OS.Windows;
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) platform = DepotsContent.OS.Windows;
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) platform = DepotsContent.OS.Linux;
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) platform = DepotsContent.OS.MacOS;
+            DepotsSection.OS platform = DepotsSection.OS.Windows;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) platform = DepotsSection.OS.Windows;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) platform = DepotsSection.OS.Linux;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) platform = DepotsSection.OS.MacOS;
 
             try
             {
