@@ -1,12 +1,15 @@
-﻿using SteamDownloader;
+﻿using DstDownloaders.Mods;
+using SteamDownloader;
 using SteamDownloader.Helpers;
 using SteamDownloader.WebApi;
 using SteamKit2;
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 
-namespace Ilyfairy.Tools;
+namespace Ilyfairy.DstDownloaders;
 
 public class DstDownloader : IDisposable
 {
@@ -17,6 +20,12 @@ public class DstDownloader : IDisposable
 
     public string? AccessToken => Steam.Authentication.AccessToken;
     public bool IsCache { get => Steam.IsCache; set => Steam.IsCache = value; }
+
+
+    private byte[]? appDepotKey;
+    private byte[]? serverDepotKey;
+
+    public Func<Uri, Uri>? FileUrlProxy { get; set; }
 
     public DstDownloader()
     {
@@ -70,7 +79,7 @@ public class DstDownloader : IDisposable
         var appInfo = await Steam.GetProductInfoAsync(ServerAppId, cancellationToken).ConfigureAwait(false);
         var depotsContent = appInfo.GetProductInfoDepotsSection();
         var windst = depotsContent.DepotsInfo[ServerWindowsDepotId];
-        var key = await Steam.GetDepotKeyAsync(appInfo.ID, windst.DepotId).ConfigureAwait(false);
+        var key = await Steam.GetDepotKeyAsync(appInfo.ID, windst.DepotId, cancellationToken).ConfigureAwait(false);
         var manifest = await Steam.GetDepotManifestAsync(ServerAppId, windst.DepotId, windst.Manifests["public"].ManifestId, key, "public", cancellationToken).ConfigureAwait(false);
         var file = manifest.Files!.First(v => v.FileName is "version.txt");
 
@@ -84,8 +93,9 @@ public class DstDownloader : IDisposable
     /// </summary>
     /// <param name="platform">平台</param>
     /// <param name="dir">要下载的目录</param>
+    /// <param name="downloadProgressCallback">进度回调</param>
     /// <returns></returns>
-    public async Task DownloadServerToDirectoryAsync(DepotsSection.OS platform, string dir, Action<FileProgress>? downloadCallback = null, CancellationToken cancellationToken = default)
+    public async Task DownloadServerToDirectoryAsync(DepotsSection.OS platform, string dir, Action<FileProgress>? downloadProgressCallback = null, CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(dir);
 
@@ -114,7 +124,7 @@ public class DstDownloader : IDisposable
 
         foreach (var manifest in manifests)
         {
-            var depotKey = await Steam.GetDepotKeyAsync(ServerAppId, manifest.DepotID).ConfigureAwait(false);
+            var depotKey = await Steam.GetDepotKeyAsync(ServerAppId, manifest.DepotID, cancellationToken).ConfigureAwait(false);
 
             var flagsGroup = manifest.Files!.GroupBy(v => v.Flags.HasFlag(EDepotFileFlag.Directory));
             var dirs = flagsGroup.FirstOrDefault(v => v.Key is true);
@@ -173,29 +183,41 @@ public class DstDownloader : IDisposable
                         var fileSHA1 = SHA1.HashData(fs);
                         if (fileData.FileHash.SequenceEqual(fileSHA1))
                         {
-                            downloadCallback?.Invoke(new FileProgress(fileData, true, Interlocked.Add(ref completedFileSize, (long)fileData.TotalSize), Interlocked.Increment(ref completedFileCount), totalFileSize, totalFileCount));
+                            downloadProgressCallback?.Invoke(new FileProgress(fileData, true, Interlocked.Add(ref completedFileSize, (long)fileData.TotalSize), Interlocked.Increment(ref completedFileCount), totalFileSize, totalFileCount));
                             return;
                         }
                         fs.Seek(0, SeekOrigin.Begin);
                     }
 
                     await Steam.DownloadFileDataToStreamAsync(fs, manifest.DepotID, depotKey, fileData, cancellationToken).ConfigureAwait(false);
-                    downloadCallback?.Invoke(new FileProgress(fileData, false, Interlocked.Add(ref completedFileSize, (long)fileData.TotalSize), Interlocked.Increment(ref completedFileCount), totalFileSize, totalFileCount));
+                    downloadProgressCallback?.Invoke(new FileProgress(fileData, false, Interlocked.Add(ref completedFileSize, (long)fileData.TotalSize), Interlocked.Increment(ref completedFileCount), totalFileSize, totalFileCount));
                 });
             }
         }
     }
-
 
     /// <summary>
     /// 获取Mod信息
     /// </summary>
     /// <param name="modId"></param>
     /// <returns></returns>
-    public async Task<ModInfo> GetModInfoAsync(ulong modId)
+    public async Task<SteamModInfo> GetModInfoAsync(ulong modId, CancellationToken cancellationToken = default)
     {
-        WorkshopFileDetails details = await Steam.GetPublishedFileAsync(AppId, modId).ConfigureAwait(false);
-        ModInfo mod = new(details);
+        WorkshopFileDetails details = await Steam.GetPublishedFileAsync(AppId, modId, cancellationToken).ConfigureAwait(false);
+        SteamModInfo mod = new(details);
+        return mod;
+    }
+
+    /// <summary>
+    /// 从WebApi获取Mod信息
+    /// </summary>
+    /// <param name="modId"></param>
+    /// <returns></returns>
+    public async Task<SteamModInfo> GetModInfoFromWebApiAsync(ulong modId, CancellationToken cancellationToken = default)
+    {
+        var response = await Steam.SteamRemoteStorage.GetPublishedFileDetails([modId], cancellationToken);
+        if (response.ResultCount is <= 0) throw new Exception("没有查询到指定Mod");
+        SteamModInfo mod = new(response.PublishedFileDetails!.First());
         return mod;
     }
 
@@ -204,46 +226,96 @@ public class DstDownloader : IDisposable
     /// </summary>
     /// <param name="modIds"></param>
     /// <returns></returns>
-    public async Task<ModInfo[]?> GetModInfoAsync(params ulong[] modIds)
+    public async Task<SteamModInfo[]?> GetModInfoAsync(ulong[] modIds, CancellationToken cancellationToken = default)
     {
-        ICollection<WorkshopFileDetails>? details = await Steam.GetPublishedFileAsync(AppId, modIds).ConfigureAwait(false);
+        ICollection<WorkshopFileDetails>? details = await Steam.GetPublishedFileAsync(AppId, modIds, cancellationToken).ConfigureAwait(false);
         if (details == null) return null;
 
-        return details.Select(v => new ModInfo(v)).ToArray();
+        return details.Select(v => new SteamModInfo(v)).ToArray();
     }
 
+
+
     /// <summary>
-    /// 下载UGC Mod到指定目录
+    /// 下载 UGC Mod 到指定目录
     /// </summary>
     /// <param name="hcontent_file"><see cref="WorkshopFileDetails.HContentFile"/> or <see cref="SteamKit2.Internal.PublishedFileDetails.hcontent_file"/></param>
     /// <param name="dir">目录</param>
     /// <returns></returns>
-    public async Task DownloadUGCModToDirectoryAsync(ulong hcontent_file, string dir)
+    public async Task DownloadUGCModToDirectoryAsync(ulong hcontent_file, string dir, CancellationToken cancellationToken = default)
     {
-        var manifest = await Steam.GetWorkshopManifestAsync(AppId, hcontent_file);
-        await Steam.DownloadDepotManifestToDirectoryAsync(dir, AppId, AppId, manifest).ConfigureAwait(false);
+        byte[]? depotKey = null;
+        if (IsCache)
+        {
+            depotKey = appDepotKey;
+        }
+        appDepotKey = depotKey ??= await Steam.GetDepotKeyAsync(AppId, AppId, cancellationToken);
+
+        var manifest = await Steam.GetWorkshopManifestAsync(AppId, hcontent_file, cancellationToken).ConfigureAwait(false);
+        await Steam.DownloadDepotManifestToDirectoryAsync(dir, depotKey, manifest, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// 下载非UGC Mod到指定目录
+    /// 下载指定的 UGC Mod 文件到指定目录
+    /// </summary>
+    /// <param name="hcontent_file"><see cref="WorkshopFileDetails.HContentFile"/> or <see cref="SteamKit2.Internal.PublishedFileDetails.hcontent_file"/></param>
+    /// <param name="dir">目录</param>
+    /// <param name="pathSearchRegex"></param>
+    /// <returns></returns>
+    public async Task DownloadUGCModToDirectoryAsync(ulong hcontent_file, string dir, [StringSyntax(StringSyntaxAttribute.Regex)] string pathSearchRegex, CancellationToken cancellationToken = default)
+    {
+        if (IsCache is false || appDepotKey is null)
+        {
+            appDepotKey = await Steam.GetDepotKeyAsync(AppId, AppId, cancellationToken);
+        }
+        byte[]? depotKey = appDepotKey;
+
+        var manifest = await Steam.GetWorkshopManifestAsync(AppId, hcontent_file, depotKey, cancellationToken).ConfigureAwait(false);
+        await Steam.DownloadDepotManifestToDirectoryAsync(dir, depotKey, manifest, pathSearchRegex, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 下载非 UGC Mod 到指定目录
     /// </summary>
     /// <param name="fileUrl">Mod文件链接</param>
     /// <param name="dir">目录</param>
     /// <returns></returns>
-    public async Task<bool> DownloadNonUGCModToDirectoryAsync(string fileUrl, string dir, CancellationToken cancellationToken = default)
+    public Task DownloadZipModToDirectoryAsync(Uri fileUrl, string dir, CancellationToken cancellationToken = default)
     {
-        Stream? stream = await Steam.HttpClient.GetStreamAsync(fileUrl, cancellationToken);
+        return DownloadZipModToDirectoryInternalAsync(fileUrl, dir, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// 下载指定的非 UGC Mod 的文件到指定目录
+    /// </summary>
+    /// <param name="fileUrl">Mod文件链接</param>
+    /// <param name="dir">目录</param>
+    /// <returns></returns>
+    public Task DownloadZipModToDirectoryAsync(Uri fileUrl, string dir, [StringSyntax(StringSyntaxAttribute.Regex)] string pathSearchRegex, CancellationToken cancellationToken = default)
+    {
+        return DownloadZipModToDirectoryInternalAsync(fileUrl, dir, pathSearchRegex, cancellationToken);
+    }
+
+    private async Task DownloadZipModToDirectoryInternalAsync(Uri fileUrl, string dir, [StringSyntax(StringSyntaxAttribute.Regex)] string? pathSearchRegex, CancellationToken cancellationToken = default)
+    {
+        fileUrl = FileUrlProxy?.Invoke(fileUrl) ?? fileUrl; // Proxy
+
+        var response = await Steam.HttpClient.GetAsync(fileUrl, cancellationToken).ConfigureAwait(false);
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
 
         ZipArchive zip = new(stream, ZipArchiveMode.Read);
         foreach (var item in zip.Entries)
         {
+            if (pathSearchRegex is not null && Regex.IsMatch(item.FullName, pathSearchRegex) is false)
+                continue;
+
             string path = Path.Combine(dir, item.FullName);
             var c = Path.GetDirectoryName(path)!;
             Directory.CreateDirectory(c);
 
-            FileStream fs = new(path, FileMode.OpenOrCreate);
+            using FileStream fs = new(path, FileMode.OpenOrCreate);
 
-            if(fs.Length == item.Length)
+            if (fs.Length == item.Length)
             {
                 using var tempStream = item.Open();
                 byte[] fsSha1 = SHA1.Create().ComputeHash(fs);
@@ -262,26 +334,66 @@ public class DstDownloader : IDisposable
             using var zipFileStream = item.Open();
             await zipFileStream.CopyToAsync(fs, cancellationToken).ConfigureAwait(false);
         }
-        return true;
     }
 
     /// <summary>
-    /// 下载Mod到指定目录
+    /// 下载 Mod 到指定目录
     /// </summary>
     /// <param name="modId">ModID</param>
     /// <param name="dir">目录</param>
     /// <returns></returns>
-    public async Task DownloadModToDirectoryAsync(ulong modId, string dir)
+    public async Task DownloadModToDirectoryAsync(ulong modId, string dir, CancellationToken cancellationToken = default)
     {
-        var info = await GetModInfoAsync(modId).ConfigureAwait(false);
+        var info = await GetModInfoAsync(modId, cancellationToken).ConfigureAwait(false);
+        await DownloadModToDirectoryAsync(info, dir, cancellationToken);
+    }
 
-        if (info.IsUGC)
+
+    /// <summary>
+    /// 下载指定的 Mod 文件到指定目录
+    /// </summary>
+    /// <param name="modId">ModID</param>
+    /// <param name="dir">目录</param>
+    /// <returns></returns>
+    public async Task DownloadModToDirectoryAsync(ulong modId, string dir, [StringSyntax(StringSyntaxAttribute.Regex)] string pathSearchRegex, CancellationToken cancellationToken = default)
+    {
+        var info = await GetModInfoAsync(modId, cancellationToken).ConfigureAwait(false);
+        await DownloadModToDirectoryAsync(info, dir, pathSearchRegex, cancellationToken);
+    }
+
+    /// <summary>
+    /// 下载 Mod 到指定目录
+    /// </summary>
+    /// <param name="modInfo">ModInfo</param>
+    /// <param name="dir">目录</param>
+    /// <returns></returns>
+    public async Task DownloadModToDirectoryAsync(SteamModInfo modInfo, string dir, CancellationToken cancellationToken = default)
+    {
+        if (modInfo.IsUGC)
         {
-            await DownloadUGCModToDirectoryAsync(info.details.HContentFile, dir).ConfigureAwait(false);
+            await DownloadUGCModToDirectoryAsync(modInfo.details.HContentFile, dir, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            await DownloadNonUGCModToDirectoryAsync(info.FileUrl, dir).ConfigureAwait(false);
+            await DownloadZipModToDirectoryAsync(modInfo.FileUrl, dir, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 下载指定的 Mod 文件到指定目录
+    /// </summary>
+    /// <param name="modInfo">ModInfo</param>
+    /// <param name="dir">目录</param>
+    /// <returns></returns>
+    public async Task DownloadModToDirectoryAsync(SteamModInfo modInfo, string dir, [StringSyntax(StringSyntaxAttribute.Regex)] string pathSearchRegex, CancellationToken cancellationToken = default)
+    {
+        if (modInfo.IsUGC)
+        {
+            await DownloadUGCModToDirectoryAsync(modInfo.details.HContentFile, dir, pathSearchRegex, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await DownloadZipModToDirectoryAsync(modInfo.FileUrl, dir, pathSearchRegex, cancellationToken).ConfigureAwait(false);
         }
     }
 

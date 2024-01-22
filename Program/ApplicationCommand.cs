@@ -7,7 +7,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
-namespace Ilyfairy.Tools;
+namespace Ilyfairy.DstDownloaders;
 
 public class ApplicationCommand : RootCommand
 {
@@ -230,8 +230,8 @@ public class ApplicationCommand : RootCommand
     public async Task<int?> GetCdnServers(CommandArgs args)
     {
         //获取cdn下载服务器
-        var cdn = await dst.Steam.GetCdnServersAsync();
-        IReadOnlyCollection<SteamContentServer> stableCdn = await SteamHelper.TestContentServerConnectionAsync(dst.Steam.HttpClient, cdn, TimeSpan.FromSeconds(3));
+        var cdn = await dst.Steam.GetCdnServersAsync().ConfigureAwait(false);
+        IReadOnlyCollection<SteamContentServer> stableCdn = await SteamHelper.TestContentServerConnectionAsync(dst.Steam.HttpClient, cdn, TimeSpan.FromSeconds(3)).ConfigureAwait(false);
         if (stableCdn.Count == 0)
             stableCdn = cdn; // 节点全超时, 可能下载速度慢
         dst.Steam.ContentServers.AddRange(stableCdn);
@@ -263,7 +263,7 @@ public class ApplicationCommand : RootCommand
 
         await Parallel.ForEachAsync(args.Mods, async (id, token) =>
         {
-            var info = await dst.GetModInfoAsync(id);
+            var info = await dst.GetModInfoAsync(id, token).ConfigureAwait(false);
             if (!info.IsValid)
             {
                 Console.WriteLine($"ModId无效: {id}");
@@ -293,11 +293,11 @@ public class ApplicationCommand : RootCommand
             {
                 if (info.IsUGC)
                 {
-                    await dst.DownloadUGCModToDirectoryAsync(info.details.HContentFile, GetModDir());
+                    await dst.DownloadUGCModToDirectoryAsync(info.details.HContentFile, GetModDir()).ConfigureAwait(false);
                 }
                 else
                 {
-                    await dst.DownloadNonUGCModToDirectoryAsync(info.FileUrl, GetModDir());
+                    await dst.DownloadZipModToDirectoryAsync(info.FileUrl, GetModDir()).ConfigureAwait(false);
                 }
             }
             catch (Exception)

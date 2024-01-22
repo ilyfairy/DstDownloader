@@ -1,6 +1,6 @@
 ﻿using System.CommandLine.Parsing;
 
-namespace Ilyfairy.Tools;
+namespace Ilyfairy.DstDownloaders;
 
 internal class Program
 {

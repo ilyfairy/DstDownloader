@@ -1,4 +1,4 @@
-﻿namespace Ilyfairy.Tools;
+﻿namespace Ilyfairy.DstDownloaders;
 
 public record AppConfig
 {

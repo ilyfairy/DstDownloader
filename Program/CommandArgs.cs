@@ -1,7 +1,7 @@
 ﻿using System.CommandLine;
 using System.CommandLine.Binding;
 
-namespace Ilyfairy.Tools;
+namespace Ilyfairy.DstDownloaders;
 
 public class CommandArgs
 {
