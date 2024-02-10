@@ -15,12 +15,13 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
+using SteamDownloader.WebApi;
 
 namespace DstDownloaders.Mods;
 
 public class DstModsFileService : IDisposable
 {
-    private readonly DstDownloader dst;
+    public DstDownloader DstSession { get; }
     private readonly ConcurrentDictionary<ulong, InternalCache> _cache = new();
     public TimeSpan CacheExpiration { get; set; } = TimeSpan.FromSeconds(60);
 
@@ -31,6 +32,8 @@ public class DstModsFileService : IDisposable
     public static readonly string ModInfoLuaFileName = "modinfo.lua";
     public static readonly string ModMainLuaFileName = "modmain.lua";
 
+    public bool IsEnableMultiLanguage { get; set; } = false;
+
     public byte[]? AppDepotKey { get; set; }
 
     public bool IsDefaultIncludeManifest { get; set; } = false;
@@ -38,16 +41,14 @@ public class DstModsFileService : IDisposable
     public JsonSerializerOptions JsonOptions { get; }
 
     private Script _lua;
-    private readonly bool isDstNew = false;
 
-    public Func<Uri, Uri>? FileUrlProxy => dst.FileUrlProxy;
+    public Func<Uri, Uri>? FileUrlProxy => DstSession.FileUrlProxy;
 
     public StoresCache Cache { get; }
 
     public DstModsFileService(DstDownloader? dstDownloader, string modsRootDirectory)
     {
-        isDstNew = dstDownloader is null;
-        dst = dstDownloader ?? new();
+        DstSession = dstDownloader ?? new();
         ModsRoot = modsRootDirectory;
 
         JsonOptions = new JsonSerializerOptions(InterfaceBase.JsonOptions);
@@ -61,6 +62,8 @@ public class DstModsFileService : IDisposable
         _lua = CreateScript();
 
         Cache = new(this);
+
+        Directory.CreateDirectory(modsRootDirectory);
     }
 
     private Script CreateScript()
@@ -83,35 +86,124 @@ public class DstModsFileService : IDisposable
 
     public async Task InitializeAsync()
     {
-        if (isDstNew || !dst.Steam.SteamClient.IsConnected || dst.Steam.ContentServers.Count == 0)
+        if (!DstSession.Steam.SteamClient.IsConnected || DstSession.Steam.ContentServers.Count == 0)
         {
-            await dst.LoginAsync();
-            var servers = await dst.Steam.GetCdnServersAsync(1);
-            var stableServers = await SteamHelper.TestContentServerConnectionAsync(dst.Steam.HttpClient, servers, TimeSpan.FromSeconds(3));
-            dst.Steam.ContentServers = stableServers.ToList();
+            await DstSession.LoginAsync();
+            var servers = await DstSession.Steam.GetCdnServersAsync(1);
+            var stableServers = await SteamHelper.TestContentServerConnectionAsync(DstSession.Steam.HttpClient, servers, TimeSpan.FromSeconds(3));
+            DstSession.Steam.ContentServers = stableServers.ToList();
         }
+    }
+
+    public async Task InitializeAsync(Func<DstDownloader, Task> callback)
+    {
+        await callback.Invoke(DstSession);
     }
 
     public async Task RunUpdateAllAsync(Action<UpdateProgressArgs>? progress, CancellationToken cancellationToken = default)
     {
-        AppDepotKey = await dst.Steam.GetDepotKeyAsync(dst.AppId, dst.AppId, cancellationToken);
+        AppDepotKey ??= await DstSession.Steam.GetDepotKeyAsync(DstSession.AppId, DstSession.AppId, cancellationToken);
 
         await Parallel.ForEachAsync(FastGetAllMods(cancellationToken), new ParallelOptions()
         {
             MaxDegreeOfParallelism = 5,
         }, async (item, cancellationToken) =>
         {
-            if (item.IsValid is false)
+            try
             {
-                progress?.Invoke(new UpdateProgressArgs()
+                if (item.IsValid is false)
                 {
-                    Type = ModsUpdateType.Failed,
-                    WorkshopId = item.WorkshopId,
-                    Store = null,
-                    UpdateElapsed = TimeSpan.Zero,
-                });
-                return;
+                    progress?.Invoke(new UpdateProgressArgs()
+                    {
+                        Type = ModsUpdateType.Failed,
+                        WorkshopId = item.WorkshopId,
+                        Store = null,
+                        UpdateElapsed = TimeSpan.Zero,
+                    });
+                    return;
+                }
+
+                bool isExists = false;
+                DstModStore? store = null;
+                {
+                    var modsPath = Path.Combine(ModsRoot, item.WorkshopId.ToString());
+                    var storeFilePath = Path.Combine(modsPath, StoreFileName);
+                    isExists = File.Exists(storeFilePath);
+                }
+
+                store = GetOrVerifyStore(item.WorkshopId, item.UpdatedTime);
+                if (isExists && store != null)
+                {
+                    var isInfoUpdate = await EnsureSteamInfoUpdateAsync(store, item);
+                    if (isInfoUpdate)
+                    {
+                        InsertCache(store);
+                        SaveToFile(store);
+                    }
+                    progress?.Invoke(new UpdateProgressArgs()
+                    {
+                        Type = isInfoUpdate ? ModsUpdateType.UpdateInfo : ModsUpdateType.Valid,
+                        WorkshopId = item.WorkshopId,
+                        Store = store,
+                        UpdateElapsed = TimeSpan.Zero,
+                    });
+                    return;
+                }
+
+                Stopwatch sw = Stopwatch.StartNew();
+                for (int i = 1; i <= 3; i++)
+                {
+                    try
+                    {
+                        store = await DownloadAsync(item, cancellationToken);
+                        progress?.Invoke(new UpdateProgressArgs()
+                        {
+                            Type = isExists ? ModsUpdateType.Update : ModsUpdateType.Download,
+                            WorkshopId = item.WorkshopId,
+                            Store = store,
+                            UpdateElapsed = sw.Elapsed,
+                        });
+                        InsertCache(store);
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (i == 3)
+                        {
+                            progress?.Invoke(new UpdateProgressArgs()
+                            {
+                                Type = ModsUpdateType.Failed,
+                                WorkshopId = item.WorkshopId,
+                                Store = null,
+                                UpdateElapsed = sw.Elapsed,
+                                Exception = ex,
+                            });
+
+                            if (ex is ConnectionException)
+                                throw;
+                            return;
+                        }
+                    }
+                }
             }
+            catch (Exception e)
+            {
+                throw;
+            }
+
+        });
+    }
+
+    public async Task RunUpdateSteamInfoAsync(CancellationToken cancellationToken = default)
+    {
+        await Parallel.ForEachAsync(FastParallelGetAllMods(cancellationToken), new ParallelOptions()
+        {
+            MaxDegreeOfParallelism = 5,
+        }, async (item, cancellationToken) =>
+        {
+            if (item.IsValid is false)
+                return;
 
             bool isExists = false;
             DstModStore? store = null;
@@ -121,58 +213,170 @@ public class DstModsFileService : IDisposable
                 isExists = File.Exists(storeFilePath);
             }
 
-            if (GetOrVerifyStore(item.WorkshopId, item.UpdatedTime) != null)
+            store = GetOrVerifyStore(item.WorkshopId, item.UpdatedTime);
+            if (isExists && store != null)
             {
-                progress?.Invoke(new UpdateProgressArgs()
+                var isInfoUpdate = await EnsureSteamInfoUpdateAsync(store, item);
+                if (isInfoUpdate)
                 {
-                    Type = ModsUpdateType.Valid,
-                    WorkshopId = item.WorkshopId,
-                    Store = store,
-                    UpdateElapsed = TimeSpan.Zero,
-                });
+                    InsertCache(store);
+                    SaveToFile(store);
+                }
                 return;
             }
+        });
+    }
 
-            Stopwatch sw = Stopwatch.StartNew();
-            for (int i = 1; i <= 3; i++)
+
+    public async Task RunUpdateMultiLanguageDescriptionAsync(CancellationToken cancellationToken = default)
+    {
+        await foreach (var item in FastParallelGetAllMultiLanguageDescription(cancellationToken))
+        {
+            try
+            {
+                var store = GetOrVerifyStore(item.WorkshopId);
+                if (store == null)
+                    continue;
+
+                InsertCache(store);
+
+                store.ExtInfo.MultiLanguage ??= new();
+                store.ExtInfo.MultiLanguage[item.Lanauage] = item.Data;
+
+                SaveToFile(store);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+    }
+
+    private void InsertCache(DstModStore store)
+    {
+        var cache = _cache.GetOrAdd(store.WorkshopId, v => new InternalCache());
+        cache.Store = store;
+    }
+
+    /// <summary>
+    /// 确保SteamModInfo更新
+    /// </summary>
+    /// <param name="store"></param>
+    /// <param name="steamModInfo"></param>
+    /// <returns>更新了则为true</returns>
+    public async Task<bool> EnsureSteamInfoUpdateAsync(DstModStore store, SteamModInfo steamModInfo)
+    {
+        if (store.SteamModInfo == steamModInfo)
+            return false;
+
+        if (store.SteamModInfo is null && steamModInfo != null)
+        {
+            store.SteamModInfo = steamModInfo;
+            return true;
+        }
+        if (store.SteamModInfo is null || steamModInfo is null)
+            return false;
+
+        var info = store.SteamModInfo;
+        var other = steamModInfo;
+
+        if (!info.IsValid || !other.IsValid)
+            return false;
+
+        bool isUpdate = false;
+
+        if (info.details.Title != other.details.Title)
+            isUpdate = true;
+
+        if (info.details.FileDescription != other.details.FileDescription)
+            isUpdate = true;
+
+        if (info.details.Favorited != other.details.Favorited)
+            isUpdate = true;
+
+        if (info.details.NumCommentsPublic != other.details.NumCommentsPublic)
+            isUpdate = true;
+
+        if (info.details.Subscriptions != other.details.Subscriptions)
+            isUpdate = true;
+
+        if (info.details.Views != other.details.Views)
+            isUpdate = true;
+
+        if (info.details.LifetimeSubscriptions != other.details.LifetimeSubscriptions)
+            isUpdate = true;
+
+        if (info.details.LifetimeFavorited != other.details.LifetimeFavorited)
+            isUpdate = true;
+
+        bool isPreviewUpdate = false;
+        if(info.details.PreviewUrl != other.details.PreviewUrl)
+        {
+            isUpdate = true;
+            isPreviewUpdate = true;
+        }
+        if(isPreviewUpdate || store.ExtInfo.PreviewImageType is null) // 获取预览图类型
+        {
+            if (info.details.PreviewUrl is { } url)
             {
                 try
                 {
-                    store = await DownloadAsync(item, cancellationToken);
-                    progress?.Invoke(new UpdateProgressArgs()
+                    var imageType = await GetPreviewImageTypeAsync(url).ConfigureAwait(false);
+                    if (store.ExtInfo.PreviewImageType != imageType)
                     {
-                        Type = isExists ? ModsUpdateType.Update : ModsUpdateType.Download,
-                        WorkshopId = item.WorkshopId,
-                        Store = store,
-                        UpdateElapsed = sw.Elapsed,
-                    });
-                    if (sw.ElapsedMilliseconds > 80 * 1000)
-                    {
-
+                        store.ExtInfo.PreviewImageType = imageType;
+                        isUpdate = true;
                     }
-                    return;
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (i == 3)
-                    {
-                        if (ex is ConnectionException)
-                            throw;
-
-                        progress?.Invoke(new UpdateProgressArgs()
-                        {
-                            Type = ModsUpdateType.Failed,
-                            WorkshopId = item.WorkshopId,
-                            Store = null,
-                            UpdateElapsed = sw.Elapsed,
-                        });
-                        return;
-                    }
+                    store.ExtInfo.PreviewImageType = null;
                 }
             }
+        }
 
-        });
+        if (other.details.Previews != null)
+        {
+            if (info.details.Previews?.Length != other.details.Previews.Length)
+            {
+                isUpdate = true;
+            }
+        }
+        
+        if (other.details.VoteData != null)
+        {
+            if (info.details.VoteData?.Score != other.details.VoteData.Score)
+            {
+                isUpdate = true;
+            }
+        }
+
+        if (isUpdate)
+        {
+            store.SteamModInfo = steamModInfo;
+        }
+
+        return isUpdate;
+    }
+
+
+    private async Task<string?> GetPreviewImageTypeAsync(string url, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var requestMessage = new HttpRequestMessage(HttpMethod.Head, url);
+            var response = await DstSession.Steam.HttpClient.SendAsync(requestMessage, cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            return response.Content.Headers.ContentType?.MediaType ?? null;
+        }
+        catch (Exception)
+        {
+            var requestMessage = new HttpRequestMessage(HttpMethod.Get, url);
+            var response = await DstSession.Steam.HttpClient.SendAsync(requestMessage,  HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            return response.Content.Headers.ContentType?.MediaType ?? null;
+            throw;
+        }
     }
 
     public async Task<DstModStore> DownloadAsync(SteamModInfo steamModInfo, CancellationToken cancellationToken = default)
@@ -189,14 +393,16 @@ public class DstModsFileService : IDisposable
         DstModStore store = new();
 
         store.WorkshopId = steamModInfo.WorkshopId;
-        store.SteamModInfo = await dst.GetModInfoAsync(steamModInfo.WorkshopId, cancellationToken);
+        store.SteamModInfo = await DstSession.GetModInfoAsync(steamModInfo.WorkshopId, cancellationToken);
         store.UpdatedTime = steamModInfo.UpdatedTime;
 
         Directory.CreateDirectory(dir);
 
         if (steamModInfo.IsUGC)
         {
-            var manifest = await dst.Steam.GetDepotManifestAsync(dst.AppId, dst.AppId, steamModInfo.details.HContentFile, "public", cancellationToken);
+            AppDepotKey ??= await DstSession.Steam.GetDepotKeyAsync(DstSession.AppId, DstSession.AppId, cancellationToken);
+
+            var manifest = await DstSession.Steam.GetDepotManifestAsync(DstSession.AppId, DstSession.AppId, steamModInfo.details.HContentFile, "public", cancellationToken);
 
             var modinfoFileData = manifest.Files!.FirstOrDefault(v => v.FileName == ModInfoLuaFileName);
             var modmainFileData = manifest.Files!.FirstOrDefault(v => v.FileName == ModMainLuaFileName);
@@ -217,7 +423,7 @@ public class DstModsFileService : IDisposable
             //下载并验证modinfo.lua和modmain.lua, 重试3次
             for (int i = 0; i < 3; i++)
             {
-                await dst.Steam.DownloadDepotManifestToDirectoryAsync(dir, dst.AppId, AppDepotKey, fileList, cancellationToken);
+                await DstSession.Steam.DownloadDepotManifestToDirectoryAsync(dir, DstSession.AppId, AppDepotKey, fileList, cancellationToken);
 
                 if (modinfoFileData != null && modinfoFileData.TotalSize != 0)
                 {
@@ -266,7 +472,7 @@ public class DstModsFileService : IDisposable
             if (steamModInfo.FileUrl is null)
                 throw new Exception("文件URL为空");
 
-            var response = await dst.Steam.HttpClient.GetAsync(FileUrlProxy?.Invoke(steamModInfo.FileUrl) ?? steamModInfo.FileUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var response = await DstSession.Steam.HttpClient.GetAsync(FileUrlProxy?.Invoke(steamModInfo.FileUrl) ?? steamModInfo.FileUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
             nint unmanagedPtr = 0;
             unsafe Stream GetStream()
@@ -343,7 +549,7 @@ public class DstModsFileService : IDisposable
 
     public async IAsyncEnumerable<SteamModInfo> FastGetAllMods([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var firstTest = await dst.Steam.PublishedFileService.QueryFiles(
+        var firstTest = await DstSession.Steam.PublishedFileService.QueryFiles(
             numperpage: 1000,
             appid: 322330,
             return_metadata: false,
@@ -353,21 +559,24 @@ public class DstModsFileService : IDisposable
         int allPage = (int)MathF.Ceiling(firstTest.Total / (float)pageItemsCount);
         HashSet<ulong> cache = new((int)firstTest.Total);
 
-        for (int page = 0; page < allPage; page++)
+        for (int page = 1; page <= allPage; page++)
         {
-            SteamDownloader.WebApi.QueryFilesResponse? response = null;
+            QueryFilesResponse? response = null;
             for (int i = 1; i <= 3; i++)
             {
                 try
                 {
-                    response = await dst.Steam.PublishedFileService.QueryFiles(
-                          page: (uint)page,
-                          numperpage: pageItemsCount,
-                          appid: 322330,
-                          return_metadata: true,
-                          return_short_description: true,
-                          cancellationToken: cancellationToken
-                          );
+                    response = await DstSession.Steam.PublishedFileService.QueryFiles(
+                        page: (uint)page,
+                        numperpage: pageItemsCount,
+                        appid: 322330,
+                        return_metadata: true,
+                        return_previews: true,
+                        return_kv_tags: true,
+                        return_vote_data: true,
+                        return_tags: true,
+                        cancellationToken: cancellationToken
+                        );
                     break;
                 }
                 catch (Exception)
@@ -399,14 +608,14 @@ public class DstModsFileService : IDisposable
 
     public async IAsyncEnumerable<SteamModInfo> FastParallelGetAllMods([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var channel = Channel.CreateBounded<SteamModInfo>(new BoundedChannelOptions(200)
+        var channel = Channel.CreateBounded<SteamModInfo>(new BoundedChannelOptions(1000)
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
             SingleWriter = true,
         });
 
-        var firstTest = await dst.Steam.PublishedFileService.QueryFiles(
+        var firstTest = await DstSession.Steam.PublishedFileService.QueryFiles(
             numperpage: 1000,
             appid: 322330,
             return_metadata: false,
@@ -424,18 +633,21 @@ public class DstModsFileService : IDisposable
 
         _ = Start();
 
-        async ValueTask Start()
+        async Task Start()
         {
             try
             {
-                await Parallel.ForEachAsync(Enumerable.Range(0, allPage), parallelOptions, async (page, cancellationToken) =>
+                await Parallel.ForEachAsync(Enumerable.Range(1, allPage), parallelOptions, async (page, cancellationToken) =>
                 {
-                    var response = await dst.Steam.PublishedFileService.QueryFiles(
+                    var response = await DstSession.Steam.PublishedFileService.QueryFiles(
                         page: (uint)page,
                         numperpage: pageItemsCount,
                         appid: 322330,
                         return_metadata: true,
-                        return_short_description: true,
+                        return_previews: true,
+                        return_kv_tags: true,
+                        return_vote_data: true,
+                        return_tags: true,
                         cancellationToken: cancellationToken
                         );
 
@@ -475,18 +687,82 @@ public class DstModsFileService : IDisposable
         }
     }
 
-    public async Task<SteamModInfo> FastGetModInfoAsync(ulong workshopId)
+    public async IAsyncEnumerable<(ulong WorkshopId, PublishedFileServiceLanguage Lanauage, DstModStore.MutiLanguage Data)> FastParallelGetAllMultiLanguageDescription([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        SteamModInfo? info = null;
-        if (!string.IsNullOrEmpty(dst.Steam.SteamClient.Configuration.WebAPIKey))
+        var channel = Channel.CreateBounded<(ulong WorkshopId, PublishedFileServiceLanguage Lanauage, DstModStore.MutiLanguage Data)>(new BoundedChannelOptions(1000)
         {
-            info = await dst.GetModInfoFromWebApiAsync(workshopId);
-        }
-        if (info is null || info.IsValid is false)
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true,
+            SingleWriter = true,
+        });
+
+        var firstTest = await DstSession.Steam.PublishedFileService.QueryFiles(
+            numperpage: 1000,
+            appid: 322330,
+            return_metadata: false,
+            cancellationToken: cancellationToken
+            );
+        uint pageItemsCount = (uint)firstTest.PublishedFileDetails!.Length;
+        int allPage = (int)MathF.Ceiling(firstTest.Total / (float)pageItemsCount);
+
+        var parallelOptions = new ParallelOptions()
         {
-            info = await dst.GetModInfoAsync(workshopId);
+            MaxDegreeOfParallelism = 4,
+            CancellationToken = cancellationToken,
+        };
+
+        _ = Start().ConfigureAwait(false);
+
+        async Task Start()
+        {
+            try
+            {
+                await Parallel.ForEachAsync(Enum.GetValues<PublishedFileServiceLanguage>(), parallelOptions, async (language, cancellationToken) =>
+                {
+                    await Parallel.ForEachAsync(Enumerable.Range(1, allPage), parallelOptions, async (page, cancellationToken) =>
+                    {
+                        var response = await DstSession.Steam.PublishedFileService.QueryFiles(
+                            page: (uint)page,
+                            numperpage: pageItemsCount,
+                            appid: DstSession.AppId,
+                            return_metadata: true,
+                            cancellationToken: cancellationToken,
+                            language: language
+                            );
+                        foreach (var details in response.PublishedFileDetails ?? [])
+                        {
+                            SteamModInfo info = new(details);
+
+                            if (info.IsValid is false)
+                                continue;
+
+                            if (details.Language != language)
+                                continue;
+
+                            var data = new DstModStore.MutiLanguage();
+                            data.Name = info.Name;
+                            data.Description = info.Description;
+                            await channel.Writer.WriteAsync((info.WorkshopId, details.Language, data), cancellationToken);
+                        }
+                    });
+                });
+                channel.Writer.Complete();
+            }
+            catch (Exception e)
+            {
+                channel.Writer.Complete(e);
+            }
         }
-        return info;
+
+        await foreach (var item in channel.Reader.ReadAllAsync(cancellationToken))
+        {
+            yield return item;
+        }
+    }
+
+    public async Task<WorkshopStorageFileDetails> FastGetModInfoLiteAsync(ulong workshopId)
+    {
+        return await DstSession.GetModInfoLiteAsync(workshopId);
     }
 
     public DstModStore? GetOrVerifyStore(ulong workshopId, DateTimeOffset? updateTime = null)
@@ -504,7 +780,14 @@ public class DstModsFileService : IDisposable
 
         DstModStore? store;
         using FileStream metadataFile = File.Open(storeFilePath, FileMode.Open);
-        store = JsonSerializer.Deserialize<DstModStore>(metadataFile, JsonOptions)!;
+        try
+        {
+            store = JsonSerializer.Deserialize<DstModStore>(metadataFile, JsonOptions)!;
+        }
+        catch (Exception e)
+        {
+            return null;
+        }
 
         if (store is null)
             return null;
@@ -536,6 +819,10 @@ public class DstModsFileService : IDisposable
                     return null; // modmain.lua损坏
             }
 
+            if(store.SteamModInfo.FileSize != 0)
+            {
+                store.ExtInfo.Size = (long)store.SteamModInfo.FileSize;
+            }
             return store;
         }
 
@@ -588,6 +875,7 @@ public class DstModsFileService : IDisposable
         {
             store.Manifest = manifest;
         }
+        store.ExtInfo.Size = (long)manifest.TotalUncompressedSize;
 
         return store;
     }
@@ -604,7 +892,7 @@ public class DstModsFileService : IDisposable
         {
             await cache.Lock.WaitAsync(cancellationToken);
 
-            SteamModInfo temp;
+            WorkshopStorageFileDetails liteInfo;
 
             if (DateTimeOffset.Now - cache.DateTime < CacheExpiration && cache.Store != null)
             {
@@ -612,9 +900,11 @@ public class DstModsFileService : IDisposable
             }
             else
             {
-                temp = await FastGetModInfoAsync(workshopId);
-                if (!temp.IsValid)
+                //在线获取
+                liteInfo = await FastGetModInfoLiteAsync(workshopId);
+                if (liteInfo.Result != 1)
                 {
+                    //如果获取失败, 则使用本地缓存
                     var localStore = GetOrVerifyStore(workshopId);
                     cache.Store = localStore;
                     cache.DateTime = DateTimeOffset.Now;
@@ -622,16 +912,22 @@ public class DstModsFileService : IDisposable
                 }
             }
 
-            var store = GetOrVerifyStore(workshopId, temp.UpdatedTime);
+            var store = GetOrVerifyStore(workshopId, liteInfo.TimeUpdated);
 
             if (store is { })
             {
+                //if (await EnsureSteamInfoUpdateAsync(store, liteInfo)) // 更新Steam信息
+                //{
+                //    SaveToFile(store);
+                //}
+
                 cache.Store = store;
                 cache.DateTime = DateTimeOffset.Now;
                 return store;
             }
 
-            var result = await DownloadAsync(temp, cancellationToken);
+            var tempInfo = await DstSession.GetModInfoAsync(workshopId, cancellationToken).ConfigureAwait(false);
+            var result = await DownloadAsync(tempInfo, cancellationToken).ConfigureAwait(false);
 
             cache.DateTime = DateTimeOffset.Now;
             cache.Store = result;
@@ -876,8 +1172,7 @@ public class DstModsFileService : IDisposable
     {
         _cache.Clear();
         _lua.ClearByteCode();
-        if (isDstNew)
-            dst.Dispose();
+        DstSession.Dispose();
     }
 
     private class InternalCache
@@ -906,6 +1201,10 @@ public class DstModsFileService : IDisposable
         /// 下载失败
         /// </summary>
         Failed,
+        /// <summary>
+        /// 更新Steam信息(订阅数量, 详细信息等)
+        /// </summary>
+        UpdateInfo,
     }
 
     public class UpdateProgressArgs
@@ -914,6 +1213,7 @@ public class DstModsFileService : IDisposable
         public ulong WorkshopId { get; set; }
         public DstModStore? Store { get; set; }
         public TimeSpan UpdateElapsed { get; set; }
+        public Exception? Exception { get; set; }
     }
 
     public class StoresCache(DstModsFileService service) : IReadOnlyCollection<DstModStore>

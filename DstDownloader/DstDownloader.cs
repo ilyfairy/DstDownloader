@@ -2,6 +2,7 @@
 using SteamDownloader;
 using SteamDownloader.Helpers;
 using SteamDownloader.WebApi;
+using SteamDownloader.WebApi.Interfaces;
 using SteamKit2;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
@@ -213,12 +214,12 @@ public class DstDownloader : IDisposable
     /// </summary>
     /// <param name="modId"></param>
     /// <returns></returns>
-    public async Task<SteamModInfo> GetModInfoFromWebApiAsync(ulong modId, CancellationToken cancellationToken = default)
+    public async Task<WorkshopStorageFileDetails> GetModInfoLiteAsync(ulong modId, CancellationToken cancellationToken = default)
     {
-        var response = await Steam.SteamRemoteStorage.GetPublishedFileDetails([modId], cancellationToken);
+        var response = await Steam.SteamRemoteStorage.GetPublishedFileDetails([modId], cancellationToken).ConfigureAwait(false);
         if (response.ResultCount is <= 0) throw new Exception("没有查询到指定Mod");
-        SteamModInfo mod = new(response.PublishedFileDetails!.First());
-        return mod;
+
+        return response.PublishedFileDetails!.First();
     }
 
     /// <summary>
@@ -249,7 +250,7 @@ public class DstDownloader : IDisposable
         {
             depotKey = appDepotKey;
         }
-        appDepotKey = depotKey ??= await Steam.GetDepotKeyAsync(AppId, AppId, cancellationToken);
+        appDepotKey = depotKey ??= await Steam.GetDepotKeyAsync(AppId, AppId, cancellationToken).ConfigureAwait(false);
 
         var manifest = await Steam.GetWorkshopManifestAsync(AppId, hcontent_file, cancellationToken).ConfigureAwait(false);
         await Steam.DownloadDepotManifestToDirectoryAsync(dir, depotKey, manifest, cancellationToken).ConfigureAwait(false);
@@ -266,7 +267,7 @@ public class DstDownloader : IDisposable
     {
         if (IsCache is false || appDepotKey is null)
         {
-            appDepotKey = await Steam.GetDepotKeyAsync(AppId, AppId, cancellationToken);
+            appDepotKey = await Steam.GetDepotKeyAsync(AppId, AppId, cancellationToken).ConfigureAwait(false);
         }
         byte[]? depotKey = appDepotKey;
 
@@ -301,7 +302,7 @@ public class DstDownloader : IDisposable
         fileUrl = FileUrlProxy?.Invoke(fileUrl) ?? fileUrl; // Proxy
 
         var response = await Steam.HttpClient.GetAsync(fileUrl, cancellationToken).ConfigureAwait(false);
-        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
         ZipArchive zip = new(stream, ZipArchiveMode.Read);
         foreach (var item in zip.Entries)
@@ -345,7 +346,7 @@ public class DstDownloader : IDisposable
     public async Task DownloadModToDirectoryAsync(ulong modId, string dir, CancellationToken cancellationToken = default)
     {
         var info = await GetModInfoAsync(modId, cancellationToken).ConfigureAwait(false);
-        await DownloadModToDirectoryAsync(info, dir, cancellationToken);
+        await DownloadModToDirectoryAsync(info, dir, cancellationToken).ConfigureAwait(false);
     }
 
 
@@ -358,7 +359,7 @@ public class DstDownloader : IDisposable
     public async Task DownloadModToDirectoryAsync(ulong modId, string dir, [StringSyntax(StringSyntaxAttribute.Regex)] string pathSearchRegex, CancellationToken cancellationToken = default)
     {
         var info = await GetModInfoAsync(modId, cancellationToken).ConfigureAwait(false);
-        await DownloadModToDirectoryAsync(info, dir, pathSearchRegex, cancellationToken);
+        await DownloadModToDirectoryAsync(info, dir, pathSearchRegex, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -1,6 +1,7 @@
 ﻿using SteamKit2;
 using System.Text.Json.Serialization;
 using SteamDownloader.Helpers.JsonConverters;
+using SteamDownloader.WebApi.Interfaces;
 
 namespace DstDownloaders.Mods;
 
@@ -23,5 +24,40 @@ public class DstModStore
     public ulong WorkshopId { get; set; }
 
     public DepotManifest? Manifest;
-}
 
+    public ExtendedInfo ExtInfo { get; set; } = new();
+
+    //public (string Description, bool IsMarkup) GetDescripion()
+    //{
+    //    if (!string.IsNullOrEmpty(SteamModInfo?.Description))
+    //    {
+    //        return (SteamModInfo.Description, true);
+    //    }
+    //    else if(!string.IsNullOrEmpty(ModInfoLua?.Description))
+    //    {
+    //        return (ModInfoLua.Description, false);
+    //    }
+    //    return (string.Empty, false);
+    //}
+
+    public class ExtendedInfo
+    {
+        /// <summary>
+        /// Mods下载后的大小
+        /// </summary>
+        public long Size { get; set; }
+
+        /// <summary>
+        /// 预览图的类型
+        /// </summary>
+        public string? PreviewImageType { get; set; }
+
+        public Dictionary<PublishedFileServiceLanguage, MutiLanguage>? MultiLanguage { get; set; }
+    }
+
+    public class MutiLanguage
+    {
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+    }
+}
