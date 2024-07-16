@@ -1216,29 +1216,29 @@ public class DstModsFileService : IDisposable
         public Exception? Exception { get; set; }
     }
 
-    public class StoresCache(DstModsFileService service) : IReadOnlyCollection<DstModStore>
+    public class StoresCache(DstModsFileService service) : IReadOnlyCollection<DstModStore?>
     {
-        public DstModStore this[ulong workshopId]
+        public DstModStore? this[ulong workshopId]
         {
-            get => service._cache[workshopId].Store!;
+            get => service._cache[workshopId].Store;
         }
 
         public int Count => service._cache.Count;
 
         public IEnumerable<ulong> Keys => service._cache.Select(v => v.Key);
 
-        public IEnumerable<DstModStore> Values => service._cache.Select(v => v.Value.Store!);
+        public IEnumerable<DstModStore?> Values => service._cache.Select(v => v.Value.Store);
 
         public bool ContainsKey(ulong key) => service._cache.ContainsKey(key);
 
-        public bool TryGetValue(ulong key, [MaybeNullWhen(false)] out DstModStore value)
+        public bool TryGetValue(ulong key, out DstModStore? value)
         {
-            var result = service._cache.TryGetValue(key, out var temp);
+            var isOk = service._cache.TryGetValue(key, out var temp);
             value = temp?.Store;
-            return result;
+            return isOk;
         }
 
-        public IEnumerator<DstModStore> GetEnumerator() => service._cache.Values.Select(v => v.Store!).GetEnumerator();
+        public IEnumerator<DstModStore?> GetEnumerator() => service._cache.Values.Select(v => v.Store).GetEnumerator();
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }
