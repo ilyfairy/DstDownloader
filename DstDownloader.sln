@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
+# 17
 VisualStudioVersion = 17.3.32714.290
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DstDownloader", "DstDownloader\DstDownloader.csproj", "{81480685-2457-43AA-8B25-9F6EFF825F0B}"
@@ -19,6 +19,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 	EndProjectSection
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MoonSharp.Interpreter.NetCore", "moonsharp\src\MoonSharp.Interpreter.NetCore\MoonSharp.Interpreter.NetCore.csproj", "{47393646-48DB-4A3A-A2E1-F1DC523052FC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BenchmarkTest", "BenchmarkTest\BenchmarkTest.csproj", "{FD314C6D-AD59-4476-91BE-0074BDEDB125}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -50,6 +52,10 @@ Global
 		{47393646-48DB-4A3A-A2E1-F1DC523052FC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{47393646-48DB-4A3A-A2E1-F1DC523052FC}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{47393646-48DB-4A3A-A2E1-F1DC523052FC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FD314C6D-AD59-4476-91BE-0074BDEDB125}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FD314C6D-AD59-4476-91BE-0074BDEDB125}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FD314C6D-AD59-4476-91BE-0074BDEDB125}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FD314C6D-AD59-4476-91BE-0074BDEDB125}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
