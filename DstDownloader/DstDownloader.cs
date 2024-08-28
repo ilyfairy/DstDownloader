@@ -10,7 +10,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace Ilyfairy.DstDownloaders;
+namespace DstDownloaders;
 
 public class DstDownloader : IDisposable
 {
@@ -41,9 +41,9 @@ public class DstDownloader : IDisposable
     /// 匿名登录
     /// </summary>
     /// <returns></returns>
-    public Task LoginAsync(CancellationToken cancellationToken = default)
+    public Task LoginAsync()
     {
-        return Steam.Authentication.LoginAnonymousAsync(cancellationToken);
+        return Steam.Authentication.LoginAnonymousAsync();
     }
 
     /// <summary>
@@ -64,9 +64,9 @@ public class DstDownloader : IDisposable
     /// <param name="username">用户名</param>
     /// <param name="accessToken">AccessToken</param>
     /// <returns></returns>
-    public Task LoginAsync(string username, string accessToken, CancellationToken cancellationToken = default)
+    public Task LoginAsync(string username, string accessToken)
     {
-        return Steam.Authentication.LoginFromAccessTokenAsync(username, accessToken, cancellationToken);
+        return Steam.Authentication.LoginFromAccessTokenAsync(username, accessToken);
     }
 
 
@@ -77,10 +77,10 @@ public class DstDownloader : IDisposable
 
     public async Task<long> GetServerVersionAsync(CancellationToken cancellationToken = default)
     {
-        var appInfo = await Steam.GetProductInfoAsync(ServerAppId, cancellationToken).ConfigureAwait(false);
+        var appInfo = await Steam.GetProductInfoAsync(ServerAppId).ConfigureAwait(false);
         var depotsContent = appInfo.GetProductInfoDepotsSection();
         var windst = depotsContent.DepotsInfo[ServerWindowsDepotId];
-        var key = await Steam.GetDepotKeyAsync(appInfo.ID, windst.DepotId, cancellationToken).ConfigureAwait(false);
+        var key = await Steam.GetDepotKeyAsync(appInfo.ID, windst.DepotId).ConfigureAwait(false);
         var manifest = await Steam.GetDepotManifestAsync(ServerAppId, windst.DepotId, windst.Manifests["public"].ManifestId, key, "public", cancellationToken).ConfigureAwait(false);
         var file = manifest.Files!.First(v => v.FileName is "version.txt");
 
@@ -100,7 +100,7 @@ public class DstDownloader : IDisposable
     {
         Directory.CreateDirectory(dir);
 
-        var appInfo = await Steam.GetProductInfoAsync(ServerAppId, cancellationToken).ConfigureAwait(false);
+        var appInfo = await Steam.GetProductInfoAsync(ServerAppId).ConfigureAwait(false);
         var depotsContent = appInfo.GetProductInfoDepotsSection();
 
         var depots = depotsContent.Where(v => v.Config?.Oslist is null or DepotsSection.OS.Unknow || v.Config.Oslist == platform);
@@ -125,7 +125,7 @@ public class DstDownloader : IDisposable
 
         foreach (var manifest in manifests)
         {
-            var depotKey = await Steam.GetDepotKeyAsync(ServerAppId, manifest.DepotID, cancellationToken).ConfigureAwait(false);
+            var depotKey = await Steam.GetDepotKeyAsync(ServerAppId, manifest.DepotID).ConfigureAwait(false);
 
             var flagsGroup = manifest.Files!.GroupBy(v => v.Flags.HasFlag(EDepotFileFlag.Directory));
             var dirs = flagsGroup.FirstOrDefault(v => v.Key is true);
@@ -202,9 +202,9 @@ public class DstDownloader : IDisposable
     /// </summary>
     /// <param name="modId"></param>
     /// <returns></returns>
-    public async Task<SteamModInfo> GetModInfoAsync(ulong modId, CancellationToken cancellationToken = default)
+    public async Task<SteamModInfo> GetModInfoAsync(ulong modId)
     {
-        WorkshopFileDetails details = await Steam.GetPublishedFileAsync(AppId, modId, cancellationToken).ConfigureAwait(false);
+        WorkshopFileDetails details = await Steam.GetPublishedFileAsync(AppId, modId).ConfigureAwait(false);
         SteamModInfo mod = new(details);
         return mod;
     }
@@ -227,9 +227,9 @@ public class DstDownloader : IDisposable
     /// </summary>
     /// <param name="modIds"></param>
     /// <returns></returns>
-    public async Task<SteamModInfo[]?> GetModInfoAsync(ulong[] modIds, CancellationToken cancellationToken = default)
+    public async Task<SteamModInfo[]?> GetModInfoAsync(ulong[] modIds)
     {
-        ICollection<WorkshopFileDetails>? details = await Steam.GetPublishedFileAsync(AppId, modIds, cancellationToken).ConfigureAwait(false);
+        ICollection<WorkshopFileDetails>? details = await Steam.GetPublishedFileAsync(AppId, modIds).ConfigureAwait(false);
         if (details == null) return null;
 
         return details.Select(v => new SteamModInfo(v)).ToArray();
@@ -250,7 +250,7 @@ public class DstDownloader : IDisposable
         {
             depotKey = appDepotKey;
         }
-        appDepotKey = depotKey ??= await Steam.GetDepotKeyAsync(AppId, AppId, cancellationToken).ConfigureAwait(false);
+        appDepotKey = depotKey ??= await Steam.GetDepotKeyAsync(AppId, AppId).ConfigureAwait(false);
 
         var manifest = await Steam.GetWorkshopManifestAsync(AppId, hcontent_file, cancellationToken).ConfigureAwait(false);
         await Steam.DownloadDepotManifestToDirectoryAsync(dir, depotKey, manifest, cancellationToken).ConfigureAwait(false);
@@ -267,7 +267,7 @@ public class DstDownloader : IDisposable
     {
         if (IsCache is false || appDepotKey is null)
         {
-            appDepotKey = await Steam.GetDepotKeyAsync(AppId, AppId, cancellationToken).ConfigureAwait(false);
+            appDepotKey = await Steam.GetDepotKeyAsync(AppId, AppId).ConfigureAwait(false);
         }
         byte[]? depotKey = appDepotKey;
 
@@ -345,7 +345,7 @@ public class DstDownloader : IDisposable
     /// <returns></returns>
     public async Task DownloadModToDirectoryAsync(ulong modId, string dir, CancellationToken cancellationToken = default)
     {
-        var info = await GetModInfoAsync(modId, cancellationToken).ConfigureAwait(false);
+        var info = await GetModInfoAsync(modId).ConfigureAwait(false);
         await DownloadModToDirectoryAsync(info, dir, cancellationToken).ConfigureAwait(false);
     }
 
@@ -358,7 +358,7 @@ public class DstDownloader : IDisposable
     /// <returns></returns>
     public async Task DownloadModToDirectoryAsync(ulong modId, string dir, [StringSyntax(StringSyntaxAttribute.Regex)] string pathSearchRegex, CancellationToken cancellationToken = default)
     {
-        var info = await GetModInfoAsync(modId, cancellationToken).ConfigureAwait(false);
+        var info = await GetModInfoAsync(modId).ConfigureAwait(false);
         await DownloadModToDirectoryAsync(info, dir, pathSearchRegex, cancellationToken).ConfigureAwait(false);
     }
 

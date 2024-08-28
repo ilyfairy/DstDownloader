@@ -1,5 +1,4 @@
-﻿using Ilyfairy.DstDownloaders;
-using SteamDownloader;
+﻿using SteamDownloader;
 using SteamDownloader.Helpers;
 using SteamDownloader.WebApi.Interfaces;
 using SteamKit2;
@@ -14,7 +13,6 @@ using DstDownloaders.Helpers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Collections;
-using System.Diagnostics.CodeAnalysis;
 using SteamDownloader.WebApi;
 
 namespace DstDownloaders.Mods;
@@ -102,7 +100,7 @@ public class DstModsFileService : IDisposable
 
     public async Task RunUpdateAllAsync(Action<UpdateProgressArgs>? progress, CancellationToken cancellationToken = default)
     {
-        AppDepotKey ??= await DstSession.Steam.GetDepotKeyAsync(DstSession.AppId, DstSession.AppId, cancellationToken);
+        AppDepotKey ??= await DstSession.Steam.GetDepotKeyAsync(DstSession.AppId, DstSession.AppId);
 
         await Parallel.ForEachAsync(FastGetAllMods(cancellationToken), new ParallelOptions()
         {
@@ -393,14 +391,14 @@ public class DstModsFileService : IDisposable
         DstModStore store = new();
 
         store.WorkshopId = steamModInfo.WorkshopId;
-        store.SteamModInfo = await DstSession.GetModInfoAsync(steamModInfo.WorkshopId, cancellationToken);
+        store.SteamModInfo = await DstSession.GetModInfoAsync(steamModInfo.WorkshopId);
         store.UpdatedTime = steamModInfo.UpdatedTime;
 
         Directory.CreateDirectory(dir);
 
         if (steamModInfo.IsUGC)
         {
-            AppDepotKey ??= await DstSession.Steam.GetDepotKeyAsync(DstSession.AppId, DstSession.AppId, cancellationToken);
+            AppDepotKey ??= await DstSession.Steam.GetDepotKeyAsync(DstSession.AppId, DstSession.AppId);
 
             var manifest = await DstSession.Steam.GetDepotManifestAsync(DstSession.AppId, DstSession.AppId, steamModInfo.details.HContentFile, "public", cancellationToken);
 
@@ -458,7 +456,7 @@ public class DstModsFileService : IDisposable
                 throw new Exception("文件损坏");
 
             MemoryStream ms = new();
-            manifest.SerializeToStream(ms);
+            manifest.Serialize(ms);
             ms.Position = 0;
 
             store.ManifestSHA1 = Convert.ToHexString(SHA1.HashData(ms));
@@ -829,13 +827,12 @@ public class DstModsFileService : IDisposable
         if (!File.Exists(manifestFilePath))
             return null;
 
-        FileStream manifestFile = File.OpenRead(manifestFilePath);
+        using FileStream manifestFile = new(manifestFilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
         if (SHA1.HashData(manifestFile).SequenceEqual(Convert.FromHexString(store.ManifestSHA1)) is false)
             return null; //manifest损坏
+        manifestFile.Close();
 
-        manifestFile.Position = 0;
-
-        var manifest = DepotManifest.Deserialize(manifestFile);
+        var manifest = DepotManifest.LoadFromFile(manifestFilePath)!;
 
         if (manifest.FilenamesEncrypted)
             return null;
@@ -926,7 +923,7 @@ public class DstModsFileService : IDisposable
                 return store;
             }
 
-            var tempInfo = await DstSession.GetModInfoAsync(workshopId, cancellationToken).ConfigureAwait(false);
+            var tempInfo = await DstSession.GetModInfoAsync(workshopId).ConfigureAwait(false);
             var result = await DownloadAsync(tempInfo, cancellationToken).ConfigureAwait(false);
 
             cache.DateTime = DateTimeOffset.Now;
@@ -1141,7 +1138,7 @@ public class DstModsFileService : IDisposable
         File.WriteAllText(modsPath, JsonSerializer.Serialize(store, JsonOptions));
     }
 
-    public bool IncludeManifest(DstModStore store)
+    public async Task<bool> IncludeManifest(DstModStore store)
     {
         if (store.SteamModInfo is null)
             return false;
@@ -1154,12 +1151,14 @@ public class DstModsFileService : IDisposable
             return false;
 
         FileStream manifestFile = File.OpenRead(manifestFilePath);
-        if (SHA1.HashData(manifestFile).SequenceEqual(Convert.FromHexString(store.ManifestSHA1)) is false)
+        if ((await SHA1.HashDataAsync(manifestFile)).SequenceEqual(Convert.FromHexString(store.ManifestSHA1)) is false)
             return false; //manifest损坏
 
         manifestFile.Position = 0;
+        using UnmanagedArray<byte> unmanagedArray = new((int)manifestFile.Length);
+        await manifestFile.CopyToAsync(new MemoryStream(unmanagedArray.Array));
 
-        var manifest = DepotManifest.Deserialize(manifestFile);
+        var manifest = DepotManifest.Deserialize(unmanagedArray.Array);
 
         if (manifest.FilenamesEncrypted)
             return false;
