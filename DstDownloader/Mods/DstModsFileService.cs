@@ -74,7 +74,7 @@ public class DstModsFileService : IDisposable
             ChooseTranslationTable = function(tbl)
             	return tbl[locale] or tbl[1]
             end
-            """);
+            """.AsMemory());
 
         script.Options.DebugPrint = v => { };
         script.DebuggerEnabled = false;
@@ -996,7 +996,7 @@ public class DstModsFileService : IDisposable
         DynValue r;
         try
         {
-            r = _lua.DoStringAndRemoveSource(luaCode, table);
+            r = _lua.DoStringAndRemoveSource(luaCode.AsMemory(), table);
             _lua.ClearByteCode();
         }
         catch (Exception e)
@@ -1011,7 +1011,7 @@ public class DstModsFileService : IDisposable
                 }
                 table["folder_name"] = $"workshop-{id}";
 
-                r = _lua.DoString(luaCode, table);
+                r = _lua.DoString(luaCode.AsMemory(), table);
             }
             catch
             {
