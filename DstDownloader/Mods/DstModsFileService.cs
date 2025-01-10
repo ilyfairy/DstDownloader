@@ -14,13 +14,18 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Collections;
 using SteamDownloader.WebApi;
+using System.Buffers;
+using DstDownloaders.Converters;
 
 namespace DstDownloaders.Mods;
 
 public class DstModsFileService : IDisposable
 {
     public DstDownloader DstSession { get; }
+
     private readonly ConcurrentDictionary<ulong, InternalCache> _cache = new();
+    public StoresCache Cache { get; }
+
     public TimeSpan CacheExpiration { get; set; } = TimeSpan.FromSeconds(60);
 
     public string ModsRoot { get; set; }
@@ -42,13 +47,33 @@ public class DstModsFileService : IDisposable
 
     public Func<Uri, Uri>? FileUrlProxy => DstSession.FileUrlProxy;
 
-    public StoresCache Cache { get; }
+    private StringCacheConverter? _stringCacheConverter;
+    public StringCacheConverter? StringCacheConverter
+    {
+        get => _stringCacheConverter;
+        set
+        {
+            _stringCacheConverter = value;
+            if (value is null)
+            {
+                if (_dstModStoreJsonOptions.Converters.FirstOrDefault(v => v is StringCacheConverter) is { } converter)
+                {
+                    _dstModStoreJsonOptions.Converters.Remove(converter);
+                }
+            }
+            else
+            {
+                _dstModStoreJsonOptions.Converters.Add(value);
+            }
+        }
+    }
+    private JsonSerializerOptions _dstModStoreJsonOptions = new();
 
     public DstModsFileService(DstDownloader? dstDownloader, string modsRootDirectory)
     {
         DstSession = dstDownloader ?? new();
         ModsRoot = modsRootDirectory;
-
+        
         JsonOptions = new JsonSerializerOptions(InterfaceBase.JsonOptions);
         JsonOptions.WriteIndented = true;
 
@@ -66,8 +91,7 @@ public class DstModsFileService : IDisposable
 
     private Script CreateScript()
     {
-        Script script;
-        script = new Script(CoreModules.String | CoreModules.Math | CoreModules.Json | CoreModules.Bit32 | CoreModules.Table | CoreModules.TableIterators | CoreModules.Metatables | CoreModules.Basic);
+        Script script = new(CoreModules.String | CoreModules.Math | CoreModules.Json | CoreModules.Bit32 | CoreModules.Table | CoreModules.TableIterators | CoreModules.Metatables | CoreModules.Basic, fastStackSize: 16384);
         script.Globals["locale"] = "zh";
 
         script.DoString("""
@@ -210,8 +234,15 @@ public class DstModsFileService : IDisposable
                 var storeFilePath = Path.Combine(modsPath, StoreFileName);
                 isExists = File.Exists(storeFilePath);
             }
+            if (_cache.TryGetValue(item.WorkshopId, out var storeCache))
+            {
+                store = storeCache.Store;
+            }
+            else
+            {
+                store = GetOrVerifyStore(item.WorkshopId, item.UpdatedTime);
+            }
 
-            store = GetOrVerifyStore(item.WorkshopId, item.UpdatedTime);
             if (isExists && store != null)
             {
                 var isInfoUpdate = await EnsureSteamInfoUpdateAsync(store, item);
@@ -228,26 +259,28 @@ public class DstModsFileService : IDisposable
 
     public async Task RunUpdateMultiLanguageDescriptionAsync(CancellationToken cancellationToken = default)
     {
-        await foreach (var item in FastParallelGetAllMultiLanguageDescription(cancellationToken))
+        if (IsEnableMultiLanguage)
         {
-            try
+            await foreach (var item in FastParallelGetAllMultiLanguageDescription(cancellationToken))
             {
-                var store = GetOrVerifyStore(item.WorkshopId);
-                if (store == null)
-                    continue;
+                try
+                {
+                    var store = GetOrVerifyStore(item.WorkshopId);
+                    if (store == null)
+                        continue;
 
-                InsertCache(store);
+                    InsertCache(store);
 
-                store.ExtInfo.MultiLanguage ??= new();
-                store.ExtInfo.MultiLanguage[item.Lanauage] = item.Data;
+                    store.ExtInfo.MultiLanguage ??= new();
+                    store.ExtInfo.MultiLanguage[item.Lanauage] = item.Data;
 
-                SaveToFile(store);
-            }
-            catch (Exception)
-            {
+                    SaveToFile(store);
+                }
+                catch (Exception)
+                {
+                }
             }
         }
-
     }
 
     private void InsertCache(DstModStore store)
@@ -351,6 +384,31 @@ public class DstModsFileService : IDisposable
 
         if (isUpdate)
         {
+            if (info.details.FileDescription == other.details.FileDescription)
+                info.details.FileDescription = other.details.FileDescription;
+            if (info.details.ShortDescription == other.details.ShortDescription)
+                info.details.ShortDescription = other.details.ShortDescription;
+            if (info.details.PreviewUrl == other.details.PreviewUrl)
+                info.details.PreviewUrl = other.details.PreviewUrl;
+            if (info.details.Url == other.details.Url)
+                info.details.Url = other.details.Url;
+            if (info.details.FileUrl == other.details.FileUrl)
+                info.details.FileUrl = other.details.FileUrl;
+            if (info.details.Previews != null && other.details.Previews != null)
+            {
+                if (info.details.Previews.SequenceEqual(other.details.Previews))
+                    info.details.Previews = other.details.Previews;
+            }
+            if (info.details.VoteData != null && other.details.VoteData != null)
+            {
+                if (info.details.VoteData == other.details.VoteData)
+                    info.details.VoteData = other.details.VoteData;
+            }
+            if (info.details.Tags != null && other.details.Tags != null)
+            {
+                if (info.details.Tags.SequenceEqual(other.details.Tags))
+                    info.details.Tags = other.details.Tags;
+            }
             store.SteamModInfo = steamModInfo;
         }
 
@@ -763,7 +821,7 @@ public class DstModsFileService : IDisposable
         return await DstSession.GetModInfoLiteAsync(workshopId);
     }
 
-    public DstModStore? GetOrVerifyStore(ulong workshopId, DateTimeOffset? updateTime = null)
+    public DstModStore? GetOrVerifyStore(ulong workshopId, DateTimeOffset? verifyUpdateTime = null)
     {
         var modsPath = Path.Combine(ModsRoot, workshopId.ToString());
         var storeFilePath = Path.Combine(modsPath, StoreFileName);
@@ -780,9 +838,9 @@ public class DstModsFileService : IDisposable
         using FileStream metadataFile = File.Open(storeFilePath, FileMode.Open);
         try
         {
-            store = JsonSerializer.Deserialize<DstModStore>(metadataFile, JsonOptions)!;
+            store = JsonSerializer.Deserialize<DstModStore>(metadataFile, _dstModStoreJsonOptions)!;
         }
-        catch (Exception e)
+        catch (Exception ex)
         {
             return null;
         }
@@ -796,92 +854,138 @@ public class DstModsFileService : IDisposable
         if (store.SteamModInfo is null)
             return null;
 
-        if (updateTime != null && store.UpdatedTime != updateTime)
+        if (verifyUpdateTime != null && store.UpdatedTime != verifyUpdateTime)
             return null;
 
+        // 非UGCMod 验证
         if (store.ManifestSHA1 == null)
         {
-            if (store.SteamModInfo!.IsUGC is true) // UGC Flags不匹配
+            // 如果没有Manifest, 则它不是UGCMod
+            if (store.SteamModInfo.IsUGC is true) // UGC Flags不匹配
                 return null;
 
             if (store.ModInfoLuaSHA1 != "0")
             {
-                using FileStream modinfoTempFs = new(modinfoFilePath, FileMode.Open);
-                if (Convert.FromHexString(store.ModInfoLuaSHA1).SequenceEqual(SHA1.HashData(modinfoTempFs)) is false)
+                using FileStream modinfoTempFile = File.OpenRead(modinfoFilePath);
+                if (!VerifySHA1(modinfoTempFile, store.ModInfoLuaSHA1))
                     return null; // modinfo.lua损坏
             }
             if (store.ModMainLuaSHA1 != "0")
             {
-                using FileStream modmainTempFs = new(modmainFilePath, FileMode.Open);
-                if (Convert.FromHexString(store.ModMainLuaSHA1).SequenceEqual(SHA1.HashData(modmainTempFs)) is false)
+                using FileStream modmainTempFile = File.OpenRead(modmainFilePath);
+                if (!VerifySHA1(modmainTempFile, store.ModMainLuaSHA1))
                     return null; // modmain.lua损坏
             }
 
-            if(store.SteamModInfo.FileSize != 0)
+            if (store.SteamModInfo.FileSize != 0)
             {
                 store.ExtInfo.Size = (long)store.SteamModInfo.FileSize;
             }
             return store;
         }
-
-        if (!File.Exists(manifestFilePath))
-            return null;
-
-        using FileStream manifestFile = new(manifestFilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
-        if (SHA1.HashData(manifestFile).SequenceEqual(Convert.FromHexString(store.ManifestSHA1)) is false)
-            return null; //manifest损坏
-        manifestFile.Close();
-
-        var manifest = DepotManifest.LoadFromFile(manifestFilePath)!;
-
-        if (manifest.FilenamesEncrypted)
-            return null;
-
-        DepotManifest.FileData? modinfoFileData = null;
-        DepotManifest.FileData? modmainFileData = null;
-
-        foreach (var item in manifest.Files!)
+        // UGCMod验证
+        else
         {
-            if (item.FileName == ModInfoLuaFileName)
-                modinfoFileData = item;
-            else if (item.FileName == ModMainLuaFileName)
-                modmainFileData = item;
+            if (!File.Exists(manifestFilePath))
+                return null;
+
+            {
+                using FileStream manifestFile = File.OpenRead(manifestFilePath);
+                if (!VerifySHA1(manifestFile, store.ManifestSHA1))
+                    return null; //manifest损坏
+            }
+
+            var manifest = DepotManifest.LoadFromFile(manifestFilePath)!;
+
+            if (manifest.FilenamesEncrypted)
+                return null;
+
+            DepotManifest.FileData? modinfoFileData = null;
+            DepotManifest.FileData? modmainFileData = null;
+
+            foreach (var item in manifest.Files!)
+            {
+                if (item.FileName == ModInfoLuaFileName)
+                    modinfoFileData = item;
+                else if (item.FileName == ModMainLuaFileName)
+                    modmainFileData = item;
+            }
+
+            if (store.ModInfoLuaSHA1 != "0" && modinfoFileData != null)
+            {
+                if (!VerifySHA1(modinfoFileData.FileHash, store.ModInfoLuaSHA1))
+                    return null; // manifest modinfo.lua的SHA1不一致
+
+                using FileStream modinfoFile = File.OpenRead(modinfoFilePath);
+                if (!VerifySHA1(modinfoFile, store.ModInfoLuaSHA1))
+                    return null; // modinfo.lua损坏
+            }
+            if (store.ModMainLuaSHA1 != "0" && modmainFileData != null)
+            {
+                if (!VerifySHA1(modmainFileData.FileHash, store.ModMainLuaSHA1))
+                    return null; // manifest modmain.lua的SHA1不一致
+
+                using FileStream modmainFile = File.OpenRead(modmainFilePath);
+                if (!VerifySHA1(modmainFile, store.ModMainLuaSHA1))
+                    return null; // modmain.lua损坏
+            }
+
+            if (IsDefaultIncludeManifest)
+            {
+                store.Manifest = manifest;
+            }
+            store.ExtInfo.Size = (long)manifest.TotalUncompressedSize;
         }
 
-        if (store.ModInfoLuaSHA1 != "0" && modinfoFileData != null)
+        // 消除重复的多语言字符串
+        if (store.ExtInfo.MultiLanguage is { } multiLanguage)
         {
-            if (modinfoFileData.FileHash.SequenceEqual(Convert.FromHexString(store.ModInfoLuaSHA1)) is false)
-                return null; // manifest modinfo.lua的SHA1不一致
-
-            using FileStream modinfofs = new(modinfoFilePath, FileMode.Open);
-            if (Convert.FromHexString(store.ModInfoLuaSHA1).SequenceEqual(SHA1.HashData(modinfofs)) is false)
-                return null; // modinfo.lua损坏
+            multiLanguage.TryGetValue(PublishedFileServiceLanguage.English, out var en);
+            multiLanguage.TryGetValue(PublishedFileServiceLanguage.Chinese, out var zh);
+            if (en != null)
+            {
+                if (en.Description == store.SteamModInfo.Description)
+                {
+                    en.Description = store.SteamModInfo.Description;
+                }
+            }
+            if (en != null && zh != null)
+            {
+                if (zh.Name == en.Name)
+                    zh.Name = en.Name;
+                if (zh.Description == en.Description)
+                    zh.Description = en.Description;
+            }
         }
-
-        if (store.ModMainLuaSHA1 != "0" && modmainFileData != null)
-        {
-            if (modmainFileData.FileHash.SequenceEqual(Convert.FromHexString(store.ModMainLuaSHA1)) is false)
-                return null; // manifest modmain.lua的SHA1不一致
-
-            using FileStream modmainfs = new(modmainFilePath, FileMode.Open);
-            if (Convert.FromHexString(store.ModMainLuaSHA1).SequenceEqual(SHA1.HashData(modmainfs)) is false)
-                return null; // modmain.lua损坏
-        }
-
-        if (IsDefaultIncludeManifest)
-        {
-            store.Manifest = manifest;
-        }
-        store.ExtInfo.Size = (long)manifest.TotalUncompressedSize;
 
         return store;
+    }
+    private static bool VerifySHA1(Stream stream, string hexSHA1)
+    {
+        if(hexSHA1.Length != 40)
+            return false;
+        Span<byte> streamSHA1 = stackalloc byte[20];
+        SHA1.HashData(stream, streamSHA1);
+        Span<byte> hexSHA1Bytes = stackalloc byte[20];
+        Convert.FromHexString(hexSHA1, hexSHA1Bytes, out _, out _);
+        return streamSHA1.SequenceEqual(hexSHA1Bytes);
+    }
+    private static bool VerifySHA1(byte[] bytesSHA1, string hexSHA1)
+    {
+        if (hexSHA1.Length != 40)
+            return false;
+        if(bytesSHA1.Length != 20)
+            return false;
+        Span<byte> hexSHA1Bytes = stackalloc byte[20];
+        Convert.FromHexString(hexSHA1, hexSHA1Bytes, out _, out _);
+        return hexSHA1Bytes.SequenceEqual(bytesSHA1);
     }
 
     public async Task<DstModStore?> GetOrDownloadAsync(ulong workshopId, CancellationToken cancellationToken = default)
     {
         var cache = _cache.GetOrAdd(workshopId, v => new InternalCache()
         {
-            DateTime = DateTimeOffset.MinValue,
+            UpdateDateTime = DateTimeOffset.MinValue,
             Store = null,
         });
 
@@ -891,7 +995,7 @@ public class DstModsFileService : IDisposable
 
             WorkshopStorageFileDetails liteInfo;
 
-            if (DateTimeOffset.Now - cache.DateTime < CacheExpiration && cache.Store != null)
+            if (DateTimeOffset.Now - cache.UpdateDateTime < CacheExpiration && cache.Store != null)
             {
                 return cache.Store;
             }
@@ -904,7 +1008,7 @@ public class DstModsFileService : IDisposable
                     //如果获取失败, 则使用本地缓存
                     var localStore = GetOrVerifyStore(workshopId);
                     cache.Store = localStore;
-                    cache.DateTime = DateTimeOffset.Now;
+                    cache.UpdateDateTime = DateTimeOffset.Now;
                     return localStore;
                 }
             }
@@ -919,14 +1023,14 @@ public class DstModsFileService : IDisposable
                 //}
 
                 cache.Store = store;
-                cache.DateTime = DateTimeOffset.Now;
+                cache.UpdateDateTime = DateTimeOffset.Now;
                 return store;
             }
 
             var tempInfo = await DstSession.GetModInfoAsync(workshopId).ConfigureAwait(false);
             var result = await DownloadAsync(tempInfo, cancellationToken).ConfigureAwait(false);
 
-            cache.DateTime = DateTimeOffset.Now;
+            cache.UpdateDateTime = DateTimeOffset.Now;
             cache.Store = result;
             return result;
         }
@@ -940,26 +1044,73 @@ public class DstModsFileService : IDisposable
     {
         foreach (var store in GetAllStores())
         {
-            _cache[store.WorkshopId] = new InternalCache() { DateTime = DateTimeOffset.Now, Store = store };
+            _cache[store.WorkshopId] = new InternalCache() { UpdateDateTime = DateTimeOffset.Now, Store = store };
         }
     }
 
     public IEnumerable<DstModStore> GetAllStores()
     {
+        var oldStringCacheMaxCount = LuaObjectJsonConverter.StringCacheMaxCount;
+        var oldStringCacheMaxCharsLength = LuaObjectJsonConverter.StringCacheMaxCharsLength;
+        var oldNumberCacheMaxCount = LuaObjectJsonConverter.NumberCacheMaxCount;
+        LuaObjectJsonConverter.StringCacheMaxCount = 10000;
+        LuaObjectJsonConverter.StringCacheMaxCharsLength = 200;
+        LuaObjectJsonConverter.NumberCacheMaxCount = 10000;
+
+        HashSet<string> tagsCache = new();
+
         foreach (var dir in Directory.EnumerateDirectories(ModsRoot))
         {
             if (!ulong.TryParse(Path.GetFileName(dir), out var id))
                 continue;
 
-            var info = GetOrVerifyStore(id);
+            var info = GetOrVerifyStore(id, null);
 
             if (info == null)
-            {
                 continue;
+
+            // tags string intern
+            foreach (ref var item in (info.SteamModInfo?.details.Tags ?? []).AsSpan())
+            {
+                if (tagsCache.TryGetValue(item.Tag, out var tag))
+                {
+                    item.Tag = tag;
+                }
+                else
+                {
+                    tagsCache.Add(item.Tag);
+                }
+                if (item.DisplayName is { })
+                {
+                    if (tagsCache.TryGetValue(item.DisplayName, out var displayName))
+                    {
+                        item.DisplayName = displayName;
+                    }
+                    else
+                    {
+                        tagsCache.Add(item.DisplayName);
+                    }
+                }
+            }
+            foreach (ref var tag in (info.SteamModInfo?.Tags ?? []).AsSpan())
+            {
+                if (tagsCache.TryGetValue(tag, out var value))
+                {
+                    tag = value;
+                }
+                else
+                {
+                    tagsCache.Add(tag);
+                }
             }
 
             yield return info;
         }
+        LuaObjectJsonConverter.StringCache.Clear();
+        LuaObjectJsonConverter.NumberCache.Clear();
+        LuaObjectJsonConverter.StringCacheMaxCount = oldStringCacheMaxCount;
+        LuaObjectJsonConverter.StringCacheMaxCharsLength = oldStringCacheMaxCharsLength;
+        LuaObjectJsonConverter.NumberCacheMaxCount = oldNumberCacheMaxCount;
     }
 
     public bool EnsureLuaInfo(DstModStore store)
@@ -971,8 +1122,23 @@ public class DstModsFileService : IDisposable
         if (!File.Exists(path))
             return false;
 
-        var code = File.ReadAllText(path);
-        var info = GetLuaInfo(code, store.SteamModInfo.WorkshopId);
+        var len = new FileInfo(path).Length;
+        var fileContentChars = ArrayPool<char>.Shared.Rent((int)len);
+        var fileEndPosition = 0;
+        ModInfoLua? info;
+        try
+        {
+            using var sr = new StreamReader(path, System.Text.Encoding.UTF8);
+            while (!sr.EndOfStream)
+            {
+                fileEndPosition += sr.Read(fileContentChars.AsSpan()[fileEndPosition..]);
+            }
+            info = GetLuaInfo(fileContentChars.AsMemory(0, fileEndPosition), store.SteamModInfo.WorkshopId);
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(fileContentChars);
+        }
 
         if (info is null)
             return false;
@@ -981,7 +1147,7 @@ public class DstModsFileService : IDisposable
         return true;
     }
 
-    public ModInfoLua? GetLuaInfo(string luaCode, ulong id)
+    public ModInfoLua? GetLuaInfo(ReadOnlyMemory<char> luaCode, ulong id)
     {
         if (luaCode.Length == 0)
             return null;
@@ -996,7 +1162,7 @@ public class DstModsFileService : IDisposable
         DynValue r;
         try
         {
-            r = _lua.DoStringAndRemoveSource(luaCode.AsMemory(), table);
+            r = _lua.DoStringAndRemoveSource(luaCode, table);
             _lua.ClearByteCode();
         }
         catch (Exception e)
@@ -1011,7 +1177,7 @@ public class DstModsFileService : IDisposable
                 }
                 table["folder_name"] = $"workshop-{id}";
 
-                r = _lua.DoString(luaCode.AsMemory(), table);
+                r = _lua.DoString(luaCode, table);
             }
             catch
             {
@@ -1044,7 +1210,7 @@ public class DstModsFileService : IDisposable
             ModInfoLua modInfo = new()
             {
                 Author = (string)author,
-                Name = name.ToString()!,
+                Name = (string)LuaConverter.CachePrimitive(name),
                 Description = description switch
                 {
                     string str => str,
@@ -1132,10 +1298,9 @@ public class DstModsFileService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(store);
 
-        JsonSerializer.Serialize(store.ModInfoLua, JsonOptions);
-
         var modsPath = Path.Combine(ModsRoot, store.SteamModInfo!.WorkshopId.ToString(), StoreFileName);
-        File.WriteAllText(modsPath, JsonSerializer.Serialize(store, JsonOptions));
+        using FileStream fs = new(modsPath, FileMode.Create);
+        JsonSerializer.Serialize(fs, store, JsonOptions);
     }
 
     public async Task<bool> IncludeManifest(DstModStore store)
@@ -1178,7 +1343,7 @@ public class DstModsFileService : IDisposable
     {
         public DstModStore? Store { get; set; }
         public SemaphoreSlim Lock { get; } = new(1);
-        public DateTimeOffset DateTime { get; set; }
+        public DateTimeOffset UpdateDateTime { get; set; }
     }
 
 
@@ -1241,3 +1406,21 @@ public class DstModsFileService : IDisposable
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }
+
+
+//public class ObjectCacheJsonConverter : JsonConverter<object>
+//{
+//    public override object? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+//    {
+//        if (reader.TokenType is JsonTokenType.StartObject)
+//        {
+//            throw new Exception("不支持Object读取");
+//        }
+//        return null;
+//    }
+
+//    public override void Write(Utf8JsonWriter writer, object value, JsonSerializerOptions options)
+//    {
+//        JsonSerializer.Serialize(value);
+//    }
+//}

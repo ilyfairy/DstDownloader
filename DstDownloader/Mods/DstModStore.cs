@@ -19,8 +19,8 @@ public class DstModStore
 
     public ModInfoLua? ModInfoLua { get; set; }
 
-    public string? ModInfoLuaSHA1 { get; set; }
-    public string? ModMainLuaSHA1 { get; set; }
+    public string? ModInfoLuaSHA1 { get; set; } // null时无效, "0"时没有modinfo.lua
+    public string? ModMainLuaSHA1 { get; set; } // null时无效, "0"时没有modmain.lua
     public ulong WorkshopId { get; set; }
 
     public DepotManifest? Manifest;

@@ -1,7 +1,7 @@
 ﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json.Serialization;
-using DstDownloaders.Helpers;
+using DstDownloaders.Converters;
 
 namespace DstDownloaders.Mods;
 
@@ -55,7 +55,7 @@ public class DstConfigurationOptionItem
 
     [Description("data")]
     [JsonConverter(typeof(LuaObjectJsonConverter))]
-    public object? Data { get; set; }
+    public object? Data { get; set; } // double, string, bool
 
     [Description("hover")]
     public string? Hover { get; set; }

@@ -1,7 +1,6 @@
-﻿using System.Text.Json;
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
+using DstDownloaders.Converters;
 using SteamDownloader.WebApi;
-using SteamDownloader.WebApi.Interfaces;
 
 namespace DstDownloaders.Mods;
 
@@ -47,6 +46,16 @@ public class SteamModInfo
                 item.Tag = "language";
                 item.DisplayName = "language";
             }
+            else if (item.Tag is "client_only_mod")
+            {
+                item.Tag = "client_only_mod";
+                item.DisplayName = "client_only_mod";
+            }
+        }
+
+        if (details.ShortDescription == details.FileDescription)
+        {
+            details.ShortDescription = details.FileDescription;
         }
     }
 
@@ -151,22 +160,4 @@ public class SteamModInfo
     /// </summary>
     public int CommentsPublic => details.NumCommentsPublic;
 
-}
-
-public class SteamModInfoJsonConverter : JsonConverter<SteamModInfo>
-{
-    public override SteamModInfo? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-    {
-        WorkshopFileDetails? workshopFileDetails = JsonSerializer.Deserialize<WorkshopFileDetails>(ref reader, InterfaceBase.JsonOptions);
-
-        if (workshopFileDetails is null)
-            return null;
-
-        return new SteamModInfo(workshopFileDetails);
-    }
-
-    public override void Write(Utf8JsonWriter writer, SteamModInfo value, JsonSerializerOptions options)
-    {
-        JsonSerializer.Serialize(writer, value.details, InterfaceBase.JsonOptions);
-    }
 }
